@@ -164,6 +164,9 @@ type TransactionIdEvent struct {
 	IsEntry     uint32 `json:"isEntry"`
 	Protocol    string `json:"protocol"`
 	Url         string `json:"url"`
+	ApmType     string `json:"apmType"`
+	ThreadType  int    `json:"threadType"`
+	Error       int    `json:"error"`
 	PidString   string `json:"pidString"`
 	ContainerId string `json:"containerId"`
 }

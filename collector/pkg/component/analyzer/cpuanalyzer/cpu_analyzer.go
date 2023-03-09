@@ -97,14 +97,28 @@ func (ca *CpuAnalyzer) ConsumeEvent(event *model.KindlingEvent) error {
 
 func (ca *CpuAnalyzer) ConsumeTransactionIdEvent(event *model.KindlingEvent) {
 	isEntry, _ := strconv.ParseUint(event.GetStringUserAttribute("is_enter"), 10, 32)
-	ev := &TransactionIdEvent{
-		Timestamp:   event.Timestamp,
-		TraceId:     event.GetStringUserAttribute("trace_id"),
-		IsEntry:     uint32(isEntry),
-		Protocol:    event.GetStringUserAttribute("protocol"),
-		Url:         event.GetStringUserAttribute("url"),
-		PidString:   strconv.FormatUint(uint64(event.GetPid()), 10),
-		ContainerId: event.GetContainerId(),
+	var ev *TransactionIdEvent
+	if isEntry == 1 {
+		ev = &TransactionIdEvent{
+			Timestamp:   event.Timestamp,
+			TraceId:     event.GetStringUserAttribute("trace_id"),
+			IsEntry:     1,
+			Protocol:    event.GetStringUserAttribute("protocol"),
+			Url:         event.GetStringUserAttribute("url"),
+			ApmType:     event.GetStringUserAttribute("apm_type"),
+			PidString:   strconv.FormatUint(uint64(event.GetPid()), 10),
+			ContainerId: event.GetContainerId(),
+		}
+	} else {
+		threadType, _ := strconv.ParseInt(event.GetStringUserAttribute("thread_type"), 10, 0)
+		error, _ := strconv.ParseInt(event.GetStringUserAttribute("error"), 10, 0)
+		ev = &TransactionIdEvent{
+			Timestamp:  event.Timestamp,
+			TraceId:    event.GetStringUserAttribute("trace_id"),
+			IsEntry:    0,
+			ThreadType: int(threadType),
+			Error:      int(error),
+		}
 	}
 	//ca.sendEventDirectly(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
 	ca.PutEventToSegments(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)

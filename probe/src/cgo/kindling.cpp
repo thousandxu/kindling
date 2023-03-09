@@ -33,6 +33,9 @@ char* traceId = new char[128];
 char* isEnter = new char[16];
 char* protocol = new char[32];
 char* url = new char[256];
+char* apmType = new char[256];
+char* threadType = new char[16];
+char* hasError = new char[16];
 char* start_time_char = new char[32];
 char* end_time_char = new char[32];
 char* tid_char = new char[32];
@@ -229,7 +232,15 @@ int getEvent(void** pp_kindling_event) {
         return 1;
       }
       if (data_param->m_len > 8 && memcmp(data_val, "kd-txid@", 8) == 0) {
-        parse_xtid(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+        parse_txid(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+        return 1;
+      }
+      if (data_param->m_len > 8 && memcmp(data_val, "kd-txin@", 8) == 0) {
+        parse_txin(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+        return 1;
+      }
+      if (data_param->m_len > 9 && memcmp(data_val, "kd-txout@", 9) == 0) {
+        parse_txout(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
         return 1;
       }
       if (data_param->m_len > 8 && memcmp(data_val, "kd-span@", 8) == 0) {
@@ -475,7 +486,7 @@ void parse_jf(char* data_val, sinsp_evt_param data_param, kindling_event_t_for_g
   p_kindling_event->paramsNumber = userAttNumber;
 }
 
-void parse_xtid(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
+void parse_txid(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
                 kindling_event_t_for_go* p_kindling_event, sinsp_threadinfo* threadInfo,
                 uint16_t& userAttNumber) {
   int val_offset = 0;
@@ -625,6 +636,176 @@ void parse_span(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
     strcpy(p_kindling_event->context.tinfo.comm, key->second);
   }
   p_kindling_event->context.tinfo.pid = threadInfo->m_pid;
+  p_kindling_event->paramsNumber = userAttNumber;
+}
+
+void parse_txin(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
+                kindling_event_t_for_go* p_kindling_event, sinsp_threadinfo* threadInfo,
+                uint16_t& userAttNumber) {
+  if (data_param.m_len < 10) {
+    return;
+  }
+  int val_offset = 0;
+  int tmp_offset = 0;
+  int traceId_offset = 0;
+  int protocol_offset = 0;
+  int url_offset = 0;
+  int apmType_offset = 0;
+
+  for (int i = 10; i < data_param.m_len; i++) {
+    if (data_val[i] == '!') {
+      if (val_offset == 0) {
+        traceId[tmp_offset] = '\0';
+        traceId_offset = tmp_offset;
+      } else if (val_offset == 1) {
+        protocol[tmp_offset] = '\0';
+        protocol_offset = tmp_offset;
+      } else if (val_offset == 2) {
+        url[tmp_offset] = '\0';
+        url_offset = tmp_offset;
+      } else if (val_offset == 3) {
+        apmType[tmp_offset] = '\0';
+        apmType_offset = tmp_offset;
+      } else if (val_offset == 4) {
+        start_time_char[tmp_offset] = '\0';
+        break;
+      }
+      tmp_offset = 0;
+      val_offset++;
+      continue;
+    }
+    if (val_offset == 0) {
+      traceId[tmp_offset] = data_val[i];
+    } else if (val_offset == 1) {
+      protocol[tmp_offset] = data_val[i];
+    } else if (val_offset == 2) {
+      url[tmp_offset] = data_val[i];
+    } else if (val_offset == 3) {
+      apmType[tmp_offset] = data_val[i];
+    } else if (val_offset == 4) {
+      start_time_char[tmp_offset] = data_val[i];
+    }
+
+    tmp_offset++;
+  }
+  p_kindling_event->timestamp = atol(start_time_char);
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "trace_id");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, traceId, traceId_offset);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = traceId_offset;
+  userAttNumber++;
+
+  isEnter[0] = '1';
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "is_enter");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, isEnter, 1);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = 1;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "protocol");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, protocol, protocol_offset);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = protocol_offset;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "url");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, url, url_offset);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = url_offset;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "apm_type");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, apmType, apmType_offset);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = apmType_offset;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->name, "apm_trace_id_event");
+  p_kindling_event->context.tinfo.tid = threadInfo->m_tid;
+  map<uint64_t, char*>::iterator key =
+      ptid_comm.find(threadInfo->m_pid << 32 | (threadInfo->m_tid & 0xFFFFFFFF));
+  if (key != ptid_comm.end()) {
+    strcpy(p_kindling_event->context.tinfo.comm, key->second);
+  } else {
+    strcpy(p_kindling_event->context.tinfo.comm, (char*)threadInfo->m_comm.data());
+  }
+  p_kindling_event->context.tinfo.pid = threadInfo->m_pid;
+  strcpy(p_kindling_event->context.tinfo.containerId, (char*)threadInfo->m_container_id.data());
+  p_kindling_event->paramsNumber = userAttNumber;
+}
+
+void parse_txout(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
+                kindling_event_t_for_go* p_kindling_event, sinsp_threadinfo* threadInfo,
+                uint16_t& userAttNumber) {
+  if (data_param.m_len < 11) {
+    return;
+  }
+  int val_offset = 0;
+  int tmp_offset = 0;
+  int traceId_offset = 0;
+
+  for (int i = 11; i < data_param.m_len; i++) {
+    if (data_val[i] == '!') {
+      if (val_offset == 0) {
+        traceId[tmp_offset] = '\0';
+        traceId_offset = tmp_offset;
+      } else if (val_offset == 1) {
+        threadType[tmp_offset] = '\0';
+      } else if (val_offset == 2) {
+        hasError[tmp_offset] = '\0';
+        break;
+      }
+      tmp_offset = 0;
+      val_offset++;
+      continue;
+    }
+    if (val_offset == 0) {
+      traceId[tmp_offset] = data_val[i];
+    } else if (val_offset == 1) {
+      threadType[tmp_offset] = data_val[i];
+    } else if (val_offset == 2) {
+      hasError[tmp_offset] = data_val[i];
+    }
+
+    tmp_offset++;
+  }
+  p_kindling_event->timestamp = s_evt->get_ts();
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "trace_id");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, traceId, traceId_offset);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = traceId_offset;
+  userAttNumber++;
+
+  isEnter[0] = '0';
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "is_enter");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, isEnter, 1);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = 1;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "thread_type");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, threadType, 1);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = 1;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->userAttributes[userAttNumber].key, "error");
+  memcpy(p_kindling_event->userAttributes[userAttNumber].value, hasError, 1);
+  p_kindling_event->userAttributes[userAttNumber].valueType = CHARBUF;
+  p_kindling_event->userAttributes[userAttNumber].len = 1;
+  userAttNumber++;
+
+  strcpy(p_kindling_event->name, "apm_trace_id_event");
+  p_kindling_event->context.tinfo.tid = threadInfo->m_tid;
+  map<uint64_t, char*>::iterator key =
+      ptid_comm.find(threadInfo->m_pid << 32 | (threadInfo->m_tid & 0xFFFFFFFF));
+  if (key != ptid_comm.end()) {
+    strcpy(p_kindling_event->context.tinfo.comm, key->second);
+  } else {
+    strcpy(p_kindling_event->context.tinfo.comm, (char*)threadInfo->m_comm.data());
+  }
+  p_kindling_event->context.tinfo.pid = threadInfo->m_pid;
+  strcpy(p_kindling_event->context.tinfo.containerId, (char*)threadInfo->m_container_id.data());
   p_kindling_event->paramsNumber = userAttNumber;
 }
 
