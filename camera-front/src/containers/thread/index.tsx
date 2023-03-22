@@ -806,13 +806,7 @@ function Thread() {
                                 }
                                 {
                                     (traceId && allSpanList.length > 0) && (nowTrace.labels.trace_type === 'harmonycloud' ? <Tag color="blue">
-                                        已检测到Kindling APM演示探针 
-                                        <Tooltip title="点击卸载">
-                                            <DeleteOutlined style={{ color: '#fc1313' }} onClick={() => toggleInstallProfile('stop_attach_agent')}/>
-                                        </Tooltip>
-                                        {
-                                            unistallLoading && <SyncOutlined spin />
-                                        }
+                                        已检测到Kindling APM演示探针
                                     </Tag> : <Tag>已检测到Tracing探针</Tag>)
                                 }
                                 <Tag>协议类型：{nowTrace?.labels?.protocol}</Tag>
@@ -832,7 +826,7 @@ function Thread() {
                     </div>
                     <Modal visible={profileModalVisible} title="提醒" onCancel={() => setProfileModalVisible(false)} footer={<div className='profile_modal_footer'>
                         <Button onClick={() => setProfileModalVisible(false)}>稍候自行安装</Button>
-                        <Button type="primary" onClick={() => toggleInstallProfile('start_attach_agent')} loading={profileModalLoading}>立即自动安装</Button>
+                        <Button type="primary" onClick={() => toggleInstallProfile('start_attach_agent')} loading={profileModalLoading} disabled>立即自动安装</Button>
                     </div>}>
                         <div className='profile_modal_text'>未检测到支持的Tracing探针，为不影响Trace的Span和线程分析，请您及时安装。(点击查看<a href='http://kindling.harmonycloud.cn/docs/reference/kindling-java-agent/kindling-java-compatibility/' target="_blank">支持的探针列表</a>)</div>
                         <div className='profile_modal_text'>或点击下方按钮，让Trace Profiling自动为您的应用(目前只支持Java应用)安装探针。</div>
