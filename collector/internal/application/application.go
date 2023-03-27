@@ -18,6 +18,7 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/cameraexporter"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/logexporter"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/otelexporter"
+	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/prometheusexporter"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor/aggregateprocessor"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor/k8sprocessor"
 	"github.com/Kindling-project/kindling/collector/pkg/component/controller"
@@ -86,6 +87,7 @@ func (a *Application) registerFactory() {
 	a.componentsFactory.RegisterProcessor(aggregateprocessor.Type, aggregateprocessor.New, aggregateprocessor.NewDefaultConfig())
 	a.componentsFactory.RegisterAnalyzer(tcpconnectanalyzer.Type.String(), tcpconnectanalyzer.New, tcpconnectanalyzer.NewDefaultConfig())
 	a.componentsFactory.RegisterExporter(cameraexporter.Type, cameraexporter.New, cameraexporter.NewDefaultConfig())
+	a.componentsFactory.RegisterExporter(prometheusexporter.Type, prometheusexporter.NewExporter, prometheusexporter.NewDefaultConfig())
 }
 
 func (a *Application) readInConfig(path string) error {
@@ -132,8 +134,13 @@ func (a *Application) buildPipeline() error {
 	tcpConnectAnalyzerFactory := a.componentsFactory.Analyzers[tcpconnectanalyzer.Type.String()]
 	tcpConnectAnalyzer := tcpConnectAnalyzerFactory.NewFunc(tcpConnectAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(tcpconnectanalyzer.Type.String()), []consumer.Consumer{k8sMetadataProcessor})
 
+	// CPU analyzer pipeline
+	prometheusExporterFactory := a.componentsFactory.Exporters[prometheusexporter.Type]
+	prometheusExporter := prometheusExporterFactory.NewFunc(prometheusExporterFactory.Config, a.telemetry.GetTelemetryTools(prometheusexporter.Type))
+	aggregateProcessorForProfiling := aggregateProcessorFactory.NewFunc(aggregateProcessorFactory.Config, a.telemetry.GetTelemetryTools(aggregateprocessor.Type), prometheusExporter)
+
 	cpuAnalyzerFactory := a.componentsFactory.Analyzers[cpuanalyzer.CpuProfile.String()]
-	cpuAnalyzer := cpuAnalyzerFactory.NewFunc(cpuAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(cpuanalyzer.CpuProfile.String()), []consumer.Consumer{cameraExporter})
+	cpuAnalyzer := cpuAnalyzerFactory.NewFunc(cpuAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(cpuanalyzer.CpuProfile.String()), []consumer.Consumer{aggregateProcessorForProfiling, cameraExporter})
 
 	// Initialize receiver packaged with multiple analyzers
 	analyzerManager, err := analyzer.NewManager(networkAnalyzer, tcpAnalyzer, tcpConnectAnalyzer, cpuAnalyzer)

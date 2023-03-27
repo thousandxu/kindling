@@ -8,20 +8,39 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/filepathhelper"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
+	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
 )
 
 var (
-	enableProfile    bool
-	once             sync.Once
-	triggerEventChan chan SendTriggerEvent
-	traceChan        chan *model.DataGroup
-	sampleMap        sync.Map
-	isInstallApm     map[uint64]bool
+	enableProfile         bool
+	once                  sync.Once
+	metricsTriggerChan    chan *model.DataGroup
+	profilingTriggerChan  chan SendTriggerEvent
+	abnormalInnerCallChan chan *model.DataGroup
+	sampleMap             sync.Map
+	isInstallApm          map[uint64]bool
 )
 
 func init() {
 	isInstallApm = make(map[uint64]bool, 100000)
+}
+
+func ReceiveProfilingSignal(data *model.DataGroup) {
+	if !enableProfile {
+		once.Do(func() {
+			// We must close the channel at the sender-side.
+			// Otherwise, we need complex codes to handle it.
+			if profilingTriggerChan != nil {
+				close(profilingTriggerChan)
+			}
+		})
+		return
+	}
+	// We save the trace to sampleMap to make it as the sending trigger event.
+	pidString := strconv.FormatInt(data.Labels.GetIntValue("pid"), 10)
+	// The data is unnecessary to be cloned as it won't be reused.
+	sampleMap.LoadOrStore(data.Labels.GetStringValue(constlabels.ContentKey)+pidString, data)
 }
 
 // ReceiveDataGroupAsSignal receives model.DataGroup as a signal.
@@ -31,11 +50,11 @@ func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 		once.Do(func() {
 			// We must close the channel at the sender-side.
 			// Otherwise, we need complex codes to handle it.
-			if triggerEventChan != nil {
-				close(triggerEventChan)
+			if metricsTriggerChan != nil {
+				close(metricsTriggerChan)
 			}
-			if traceChan != nil {
-				close(traceChan)
+			if abnormalInnerCallChan != nil {
+				close(abnormalInnerCallChan)
 			}
 		})
 		return
@@ -43,14 +62,10 @@ func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 	isFromApm := data.Labels.GetBoolValue("isInstallApm")
 	if isFromApm {
 		isInstallApm[uint64(data.Labels.GetIntValue("pid"))] = true
-		if !data.Labels.GetBoolValue(constlabels.IsSlow) {
-			return
-		}
-		// We save the trace to sampleMap to make it as the sending trigger event.
-		pidString := strconv.FormatInt(data.Labels.GetIntValue("pid"), 10)
-		// The data is unnecessary to be cloned as it won't be reused.
-		sampleMap.LoadOrStore(data.Labels.GetStringValue(constlabels.ContentKey)+pidString, data)
+		// Trigger the metric extraction using the key thread
+		metricsTriggerChan <- data.Clone()
 	} else {
+		// Sampling the abnormal profiling
 		if !data.Labels.GetBoolValue(constlabels.IsSlow) {
 			return
 		}
@@ -59,7 +74,7 @@ func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 		// CpuAnalyzer consumes all traces from the client-side to add them to TimeSegments for data enrichment.
 		// Now we don't store the trace from the server-side due to the storage concern.
 		if !trace.Labels.GetBoolValue(constlabels.IsServer) {
-			traceChan <- trace
+			abnormalInnerCallChan <- trace
 			// The trace sent from the client-side won't be treated as trigger event, so we just return here.
 			return
 		}
@@ -82,15 +97,42 @@ type SendTriggerEvent struct {
 // ReadTraceChan reads the trace channel and make cpuanalyzer consume them as general events.
 func (ca *CpuAnalyzer) ReadTraceChan() {
 	// Break the for loop if the channel is closed
-	for trace := range traceChan {
+	for trace := range abnormalInnerCallChan {
 		ca.ConsumeTraces(trace)
 	}
 }
 
-// ReadTriggerEventChan reads the triggerEvent channel and creates tasks to send cpuEvents.
-func (ca *CpuAnalyzer) ReadTriggerEventChan() {
+func (ca *CpuAnalyzer) ReadMetricsTriggerChan() {
 	// Break the for loop if the channel is closed
-	for sendContent := range triggerEventChan {
+	for trigger := range metricsTriggerChan {
+		pid := trigger.Labels.GetIntValue(constlabels.Pid)
+		tid := trigger.Labels.GetIntValue(constlabels.Tid)
+		startTime := trigger.Timestamp
+		endTime := trigger.Labels.GetIntValue(constlabels.EndTime)
+		aggregatedTime := ca.GetTimes(uint32(pid), uint32(tid), startTime, uint64(endTime))
+		ca.telemetry.Logger.Infof("Receive the metrics trigger event: pid=%d, tid=%d, startTime=%d, endTime=%d."+
+			"The aggregated time is: %v", pid, tid, startTime, endTime, aggregatedTime)
+		// metrics composite
+		metrics := []*model.Metric{
+			model.NewIntMetric(constnames.ProfilingCpuDurationMetric, int64(aggregatedTime.times[0])),
+			model.NewIntMetric(constnames.ProfilingFileDurationMetric, int64(aggregatedTime.times[1])),
+			model.NewIntMetric(constnames.ProfilingNetDurationMetric, int64(aggregatedTime.times[2])),
+			model.NewIntMetric(constnames.ProfilingFutexDurationMetric, int64(aggregatedTime.times[3])),
+		}
+		// Ignore the original metrics
+		trigger.Metrics = metrics
+		trigger.Name = constnames.ProfilingMetricsGroupName
+		// Aggregate the metrics
+		for _, nexConsumer := range ca.nextConsumers {
+			_ = nexConsumer.Consume(trigger)
+		}
+	}
+}
+
+// ReadProfilingTriggerChan reads the triggerEvent channel and creates tasks to send cpuEvents.
+func (ca *CpuAnalyzer) ReadProfilingTriggerChan() {
+	// Break the for loop if the channel is closed
+	for sendContent := range profilingTriggerChan {
 		// Only send the slow traces as the signals
 		if !sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
 			continue
@@ -142,6 +184,7 @@ func (ca *CpuAnalyzer) sampleSend() {
 	for {
 		select {
 		case <-timer.C:
+			// TODO More complicated sampling method
 			sampleMap.Range(func(k, v interface{}) bool {
 				data := v.(*model.DataGroup)
 				duration, ok := data.GetMetric(constvalues.RequestTotalTime)
@@ -154,7 +197,7 @@ func (ca *CpuAnalyzer) sampleSend() {
 					SpendTime:    uint64(duration.GetInt().Value),
 					OriginalData: data,
 				}
-				triggerEventChan <- event
+				profilingTriggerChan <- event
 				sampleMap.Delete(k)
 				return true
 			})

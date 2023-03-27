@@ -32,6 +32,7 @@ type AggregateProcessor struct {
 	aggregator               aggregator.Aggregator
 	netRequestLabelSelectors *aggregator.LabelSelectors
 	tcpLabelSelectors        *aggregator.LabelSelectors
+	profilingLabelSelectors  *aggregator.LabelSelectors
 	stopCh                   chan struct{}
 	ticker                   *time.Ticker
 }
@@ -46,6 +47,7 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 		aggregator:               defaultaggregator.NewDefaultAggregator(toAggregatedConfig(cfg.AggregateKindMap)),
 		netRequestLabelSelectors: newNetRequestLabelSelectors(),
 		tcpLabelSelectors:        newTcpLabelSelectors(),
+		profilingLabelSelectors:  newCpuLabelSelectors(),
 		stopCh:                   make(chan struct{}),
 		ticker:                   time.NewTicker(time.Duration(cfg.TickerInterval) * time.Second),
 	}
@@ -135,8 +137,11 @@ func (p *AggregateProcessor) Consume(dataGroup *model.DataGroup) error {
 	case constnames.TcpConnectMetricGroupName:
 		p.aggregator.Aggregate(dataGroup, tcpConnectLabelSelectors)
 		return nil
+	case constnames.ProfilingMetricsGroupName:
+		p.aggregator.Aggregate(dataGroup, p.profilingLabelSelectors)
+		return nil
 	default:
-		p.aggregator.Aggregate(dataGroup, p.netRequestLabelSelectors)
+		// If not specified, just pass through
 		return nil
 	}
 }
@@ -182,6 +187,19 @@ func newNetRequestLabelSelectors() *aggregator.LabelSelectors {
 		aggregator.LabelSelector{Name: constlabels.DnsDomain, VType: aggregator.StringType},
 		aggregator.LabelSelector{Name: constlabels.KafkaTopic, VType: aggregator.StringType},
 		aggregator.LabelSelector{Name: constlabels.RocketMQErrCode, VType: aggregator.IntType},
+	)
+}
+
+func newCpuLabelSelectors() *aggregator.LabelSelectors {
+	return aggregator.NewLabelSelectors(
+		aggregator.LabelSelector{Name: constlabels.Pid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.Protocol, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.ContentKey, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.IsServer, VType: aggregator.BooleanType},
+		aggregator.LabelSelector{Name: constlabels.ContainerId, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstPod, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstContainer, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstWorkloadName, VType: aggregator.StringType},
 	)
 }
 

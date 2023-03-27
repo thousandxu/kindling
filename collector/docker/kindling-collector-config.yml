@@ -35,6 +35,8 @@ receivers:
       - name: tracepoint-procexit
 analyzers:
   cpuanalyzer:
+    # open_java_trace_sampling is the switch for whether to use Java-Trace to trigger sampling.
+    open_java_trace_sampling: false
     # sampling_interval is the sampling interval for the same url. The unit is second.
     sampling_interval: 5
     # segment_size defines how many segments(seconds) can be cached to wait for sending.
@@ -147,6 +149,18 @@ processors:
         - kind: sum
       kindling_tcp_connect_duration_nanoseconds_total:
         - kind: sum
+      kindling_profiling_cpu_duration_nanoseconds:
+        - kind: histogram
+          explicit_boundaries: [5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000]
+      kindling_profiling_net_duration_nanoseconds:
+        - kind: histogram
+          explicit_boundaries: [5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000]
+      kindling_profiling_file_duration_nanoseconds:
+        - kind: histogram
+          explicit_boundaries: [5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000]
+      kindling_profiling_futex_duration_nanoseconds:
+        - kind: histogram
+          explicit_boundaries: [5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000]
     sampling_rate:
       normal_data: 0
       slow_data: 100
@@ -165,6 +179,9 @@ exporters:
     es_config:
       es_host: http://10.10.10.10:9200
       index_suffix: dev
+  prometheusexporter:
+    prometheus:
+      endpoint: 0.0.0.0:9499
   otelexporter:
     adapter_config:
       need_trace_as_metric: true

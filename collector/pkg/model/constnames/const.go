@@ -29,6 +29,8 @@ const (
 	SpanEvent          = "apm_span_event"
 	OtherEvent         = "other"
 
+	ProfilingMetricsGroupName = "profiling_metrics_group"
+
 	ProcessExitEvent = "procexit"
 	GrpcUprobeEvent  = "grpc_uprobe"
 	// NetRequestMetricGroupName is used for dataGroup generated from networkAnalyzer.

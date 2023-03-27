@@ -13,11 +13,13 @@ func (ca *CpuAnalyzer) ProfileModule() (submodule string, start func() error, st
 func (ca *CpuAnalyzer) StartProfile() error {
 	// control flow changed
 	// Note that these two variables belongs to the package
-	triggerEventChan = make(chan SendTriggerEvent, 3e5)
-	traceChan = make(chan *model.DataGroup, 1e4)
+	metricsTriggerChan = make(chan *model.DataGroup, 3e5)
+	profilingTriggerChan = make(chan SendTriggerEvent, 3e5)
+	abnormalInnerCallChan = make(chan *model.DataGroup, 1e4)
 	enableProfile = true
 	once = sync.Once{}
-	go ca.ReadTriggerEventChan()
+	go ca.ReadProfilingTriggerChan()
+	go ca.ReadMetricsTriggerChan()
 	go ca.ReadTraceChan()
 	return nil
 }

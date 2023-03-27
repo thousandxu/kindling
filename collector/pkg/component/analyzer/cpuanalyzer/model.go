@@ -2,7 +2,6 @@ package cpuanalyzer
 
 import (
 	"encoding/json"
-
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
@@ -30,6 +29,57 @@ type TimedEvent interface {
 	StartTimestamp() uint64
 	EndTimestamp() uint64
 	Kind() TimedEventKind
+}
+
+func (tm *Segment) UnmarshalJSON(data []byte) error {
+	events := make(map[string]json.RawMessage)
+	err := json.Unmarshal(data, &events)
+
+	if err != nil {
+		return err
+	}
+
+	for k, v := range events {
+		switch k {
+		case "startTime":
+			var t uint64
+			err := json.Unmarshal(v, &t)
+			if err != nil {
+				return err
+			}
+			tm.StartTime = t
+		case "endTime":
+			var t uint64
+			err := json.Unmarshal(v, &t)
+			if err != nil {
+				return err
+			}
+			tm.EndTime = t
+		case CpuEventLabel:
+			var e []CpuEvent
+			err := json.Unmarshal(v, &e)
+			if err != nil {
+				return err
+			}
+			for i, _ := range e {
+				tm.CpuEvents = append(tm.CpuEvents, &e[i])
+			}
+
+		case JavaFutexEventLabel:
+			var e []JavaFutexEvent
+			err := json.Unmarshal(v, &e)
+			if err != nil {
+				return err
+			}
+			for _, a := range e {
+				tm.JavaFutexEvents = append(tm.JavaFutexEvents, &a)
+			}
+		default:
+			//return errors.New("unrecognized key")
+		}
+	}
+
+	return nil
 }
 
 type TimeSegments struct {
@@ -116,16 +166,29 @@ func (s *Segment) toDataGroup(parent *TimeSegments) *model.DataGroup {
 	return model.NewDataGroup(constnames.CameraEventGroupName, labels, s.StartTime)
 }
 
+type CPUType uint8
+
+const (
+	CPUType_ON    CPUType = 0
+	CPUType_FILE  CPUType = 1
+	CPUType_NET   CPUType = 2
+	CPUType_FUTEX CPUType = 3
+	CPUType_IDLE  CPUType = 4
+	CPUType_OTHER CPUType = 5
+	CPUType_EPOLL CPUType = 6
+	CPUTYPE_MAX   CPUType = 7
+)
+
 type CpuEvent struct {
-	StartTime   uint64 `json:"startTime"`
-	EndTime     uint64 `json:"endTime"`
-	TypeSpecs   string `json:"typeSpecs"`
-	RunqLatency string `json:"runqLatency"`
-	TimeType    string `json:"timeType"`
-	OnInfo      string `json:"onInfo"`
-	OffInfo     string `json:"offInfo"`
-	Log         string `json:"log"`
-	Stack       string `json:"stack"`
+	StartTime   uint64    `json:"startTime"`
+	EndTime     uint64    `json:"endTime"`
+	TypeSpecs   []uint64  `json:"typeSpecs"`
+	RunqLatency []uint64  `json:"runqLatency"`
+	TimeType    []CPUType `json:"timeType"`
+	OnInfo      string    `json:"onInfo"`
+	OffInfo     string    `json:"offInfo"`
+	Log         string    `json:"log"`
+	Stack       string    `json:"stack"`
 }
 
 func (c *CpuEvent) StartTimestamp() uint64 {
@@ -167,7 +230,8 @@ type TransactionIdEvent struct {
 	ApmType     string `json:"apmType"`
 	ThreadType  int    `json:"threadType"`
 	Error       int    `json:"error"`
-	PidString   string `json:"pidString"`
+	Pid         uint32 `json:"pidString"`
+	Tid         uint32 `json:"tid"`
 	ContainerId string `json:"containerId"`
 }
 

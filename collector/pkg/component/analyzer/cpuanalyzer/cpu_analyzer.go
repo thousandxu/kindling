@@ -1,6 +1,8 @@
 package cpuanalyzer
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"sync"
@@ -37,6 +39,7 @@ type CpuAnalyzer struct {
 	tidExpiredQueue      *tidDeleteQueue
 	javaTraces           map[string]*TransactionIdEvent
 	nextConsumers        []consumer.Consumer
+	metadata             *kubernetes.K8sMetaDataCache
 	sampleCache          *SampleCache
 }
 
@@ -67,7 +70,8 @@ func NewCpuAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, consum
 		telemetry:     telemetry,
 		nextConsumers: consumers,
 		routineSize:   atomic.NewInt32(0),
-		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), config.JavaTraceSlowTime, config.SampleTraceWaitTime, config.SampleUrlHitDuration, kubernetes.MetaDataCache),
+		metadata:      kubernetes.MetaDataCache,
+		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), config.JavaTraceSlowTime, config.SampleTraceWaitTime, config.SampleUrlHitDuration, config.SampleTraceRepeatNum),
 	}
 	ca.cpuPidEvents = make(map[uint32]map[uint32]*TimeSegments, 100000)
 	ca.tidExpiredQueue = newTidDeleteQueue()
@@ -122,18 +126,22 @@ func (ca *CpuAnalyzer) ConsumeTransactionIdEvent(event *model.KindlingEvent) {
 			Protocol:    event.GetStringUserAttribute("protocol"),
 			Url:         event.GetStringUserAttribute("url"),
 			ApmType:     event.GetStringUserAttribute("apm_type"),
-			PidString:   strconv.FormatUint(uint64(event.GetPid()), 10),
+			Pid:         event.GetPid(),
+			Tid:         event.Ctx.ThreadInfo.GetTid(),
 			ContainerId: event.GetContainerId(),
 		}
 	} else {
 		threadType, _ := strconv.ParseInt(event.GetStringUserAttribute("thread_type"), 10, 0)
-		error, _ := strconv.ParseInt(event.GetStringUserAttribute("error"), 10, 0)
+		isError, _ := strconv.ParseInt(event.GetStringUserAttribute("error"), 10, 0)
 		ev = &TransactionIdEvent{
-			Timestamp:  event.Timestamp,
-			TraceId:    event.GetStringUserAttribute("trace_id"),
-			IsEntry:    0,
-			ThreadType: int(threadType),
-			Error:      int(error),
+			Timestamp:   event.Timestamp,
+			TraceId:     event.GetStringUserAttribute("trace_id"),
+			IsEntry:     0,
+			ThreadType:  int(threadType),
+			Error:       int(isError),
+			Pid:         event.GetPid(),
+			Tid:         event.Ctx.ThreadInfo.GetTid(),
+			ContainerId: event.GetContainerId(),
 		}
 	}
 	//ca.sendEventDirectly(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
@@ -144,30 +152,59 @@ func (ca *CpuAnalyzer) ConsumeTransactionIdEvent(event *model.KindlingEvent) {
 }
 
 func (ca *CpuAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
+	tidString := strconv.FormatUint(uint64(ev.Tid), 10)
+	key := ev.TraceId + tidString
 	if ev.IsEntry == 1 {
-		ca.javaTraces[ev.TraceId+ev.PidString] = ev
+		ca.javaTraces[key] = ev
 	} else {
-		oldEvent := ca.javaTraces[ev.TraceId+ev.PidString]
-		if oldEvent == nil {
+		entryEvent := ca.javaTraces[key]
+		if entryEvent == nil {
+			ca.telemetry.Logger.Infof("Not find the entry traceid event for TraceID=%s, threadID=%s", ev.TraceId, tidString)
 			return
 		}
-		if oldEvent.ThreadType > 0 {
+		delete(ca.javaTraces, key)
+
+		if ev.ThreadType != 0 {
 			// 丢弃非业务线程数据.
 			return
 		}
 
-		sampleTrace := NewSampleTrace(oldEvent, ev, ca.cfg.SampleTraceRepeatNum)
-		if ca.sampleCache.isSampled(sampleTrace) {
-			// 保存Trace 和 Profiling
-			ca.sampleCache.storeProfiling(sampleTrace)
-			ca.sampleCache.storeTrace(sampleTrace)
-		} else if ca.sampleCache.isTailBaseSampled(sampleTrace) {
-			// 只保留Trace数据
-			ca.sampleCache.storeTrace(sampleTrace)
-		} else {
-			// 非错 或 慢 或 URL5s内已采中, 将数据存储到SampleCache中
-			ca.sampleCache.cacheSampleTrace(sampleTrace)
+		spendTime := ev.Timestamp - entryEvent.Timestamp
+		var isSlow bool
+		if spendTime > uint64(ca.cfg.JavaTraceSlowTime)*uint64(time.Millisecond) {
+			isSlow = true
 		}
+		contentKey := entryEvent.Url
+		protocol := entryEvent.Protocol
+		labels := model.NewAttributeMapWithValues(map[string]model.AttributeValue{
+			constlabels.IsSlow:         model.NewBoolValue(isSlow),
+			constlabels.Pid:            model.NewIntValue(int64(ev.Pid)),
+			constlabels.Tid:            model.NewIntValue(int64(ev.Tid)),
+			constlabels.Protocol:       model.NewStringValue(protocol),
+			constlabels.ContentKey:     model.NewStringValue(contentKey),
+			"isInstallApm":             model.NewBoolValue(true),
+			constlabels.IsServer:       model.NewBoolValue(true),
+			constlabels.HttpApmTraceId: model.NewStringValue(ev.TraceId),
+			constlabels.ContainerId:    model.NewStringValue(ev.ContainerId),
+			constlabels.EndTime:        model.NewIntValue(int64(ev.Timestamp)),
+		})
+		if protocol == "http" {
+			labels.AddStringValue(constlabels.HttpUrl, contentKey)
+		}
+		if kubernetes.IsInitSuccess {
+			k8sInfo, ok := ca.metadata.GetByContainerId(ev.ContainerId)
+			if ok {
+				labels.AddStringValue(constlabels.DstWorkloadName, k8sInfo.RefPodInfo.WorkloadName)
+				labels.AddStringValue(constlabels.DstContainer, k8sInfo.Name)
+				labels.AddStringValue(constlabels.DstPod, k8sInfo.RefPodInfo.PodName)
+			}
+		}
+		metric := model.NewIntMetric(constvalues.RequestTotalTime, int64(spendTime))
+		dataGroup := model.NewDataGroup(constnames.SpanEvent, labels, entryEvent.Timestamp, metric)
+		ReceiveDataGroupAsSignal(dataGroup)
+
+		// 采样Trace / Profiling数据
+		ca.sampleCache.Sample(dataGroup, ev.Error > 0)
 	}
 }
 
@@ -230,12 +267,27 @@ func (ca *CpuAnalyzer) ConsumeCpuEvent(event *model.KindlingEvent) {
 			ev.StartTime = userAttributes.GetUintValue()
 		case event.UserAttributes[i].GetKey() == "end_time":
 			ev.EndTime = userAttributes.GetUintValue()
-		case event.UserAttributes[i].GetKey() == "type_specs":
-			ev.TypeSpecs = string(userAttributes.GetValue())
+		case event.UserAttributes[i].GetKey() == "time_specs":
+			val := userAttributes.GetValue()
+			ev.TypeSpecs = make([]uint64, len(val)/8)
+			err := binary.Read(bytes.NewBuffer(val), binary.LittleEndian, ev.TypeSpecs)
+			if err != nil {
+				ca.telemetry.Logger.Error("Failed to read time_specs")
+			}
 		case event.UserAttributes[i].GetKey() == "runq_latency":
-			ev.RunqLatency = string(userAttributes.GetValue())
+			val := userAttributes.GetValue()
+			ev.RunqLatency = make([]uint64, len(val)/8)
+			err := binary.Read(bytes.NewBuffer(val), binary.LittleEndian, ev.RunqLatency)
+			if err != nil {
+				ca.telemetry.Logger.Error("Failed to read runq_latency")
+			}
 		case event.UserAttributes[i].GetKey() == "time_type":
-			ev.TimeType = string(userAttributes.GetValue())
+			val := userAttributes.GetValue()
+			ev.TimeType = make([]CPUType, len(val))
+			err := binary.Read(bytes.NewBuffer(val), binary.LittleEndian, ev.TimeType)
+			if err != nil {
+				ca.telemetry.Logger.Error("Failed to read time_type")
+			}
 		case event.UserAttributes[i].GetKey() == "on_info":
 			ev.OnInfo = string(userAttributes.GetValue())
 		case event.UserAttributes[i].GetKey() == "off_info":

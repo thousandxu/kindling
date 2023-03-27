@@ -37,6 +37,11 @@ const (
 
 	TcpConnectTotalMetric    = "kindling_tcp_connect_total"
 	TcpConnectDurationMetric = "kindling_tcp_connect_duration_nanoseconds_total"
+
+	ProfilingCpuDurationMetric   = "kindling_profiling_cpu_duration_nanoseconds"
+	ProfilingNetDurationMetric   = "kindling_profiling_net_duration_nanoseconds"
+	ProfilingFileDurationMetric  = "kindling_profiling_file_duration_nanoseconds"
+	ProfilingFutexDurationMetric = "kindling_profiling_futex_duration_nanoseconds"
 )
 
 const (
@@ -54,7 +59,7 @@ func ToKindlingNetMetricName(origName string, isServer bool) string {
 	}
 }
 
-//ToKindlingDetailMetricName For ServerDetail Metric
+// ToKindlingDetailMetricName For ServerDetail Metric
 func ToKindlingDetailMetricName(origName string, protocol string) string {
 	if names, ok := metricNameDictionary[origName]; !ok {
 		return ""

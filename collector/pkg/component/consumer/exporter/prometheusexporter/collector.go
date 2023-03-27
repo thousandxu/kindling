@@ -3,12 +3,13 @@ package prometheusexporter
 import (
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/Kindling-project/kindling/collector/pkg/aggregator/defaultaggregator"
 	"github.com/Kindling-project/kindling/collector/pkg/component"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type collector struct {
@@ -32,14 +33,14 @@ func (c *collector) Collect(metrics chan<- prometheus.Metric) {
 			metric := dataGroup.Metrics[s]
 			switch metric.DataType() {
 			case model.IntMetricType:
-				metric, error := prometheus.NewConstMetric(prometheus.NewDesc(
+				metric, err := prometheus.NewConstMetric(prometheus.NewDesc(
 					sanitize(metric.Name, true),
 					"",
 					keys,
 					nil,
 					// TODO not all IntMetric are Counter, they can also be a Metric
 				), prometheus.CounterValue, float64(metric.GetInt().Value), values...)
-				if error == nil {
+				if err == nil {
 					tm := prometheus.NewMetricWithTimestamp(ts, metric)
 					metrics <- tm
 				}
@@ -50,13 +51,13 @@ func (c *collector) Collect(metrics chan<- prometheus.Metric) {
 					bound := histogram.ExplicitBoundaries[x]
 					buckets[float64(bound)] = histogram.BucketCounts[x]
 				}
-				metric, error := prometheus.NewConstHistogram(prometheus.NewDesc(
+				metric, err := prometheus.NewConstHistogram(prometheus.NewDesc(
 					sanitize(metric.Name, true),
 					"",
 					keys,
 					nil,
 				), histogram.Count, float64(histogram.Sum), buckets, values...)
-				if error == nil {
+				if err == nil {
 					tm := prometheus.NewMetricWithTimestamp(ts, metric)
 					metrics <- tm
 				}
@@ -69,15 +70,19 @@ func (c *collector) recordMetricGroups(group *model.DataGroup) {
 	c.aggregator.AggregatorWithAllLabelsAndMetric(group, time.Now())
 }
 
-func newCollector(config *Config, _ *component.TelemetryLogger) *collector {
+func newCollector(_ *Config, _ *component.TelemetryLogger) *collector {
 	// TODO Do this in config later !!!!
 	requestTimeHistogramTopologyMetric := constnames.ToKindlingNetMetricName(constvalues.RequestTimeHistogram, false)
 	requestTimeHistogramEntityMetric := constnames.ToKindlingNetMetricName(constvalues.RequestTimeHistogram, true)
+	profilingBoundaries := []int64{5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000}
 	return &collector{
 		aggregator: defaultaggregator.NewCumulativeAggregator(
 			&defaultaggregator.AggregatedConfig{
 				KindMap: map[string][]defaultaggregator.KindConfig{
-					constnames.TcpRttMetricName: {{Kind: defaultaggregator.LastKind, OutputName: constnames.TcpRttMetricName}},
+					constnames.TcpRttMetricName: {{
+						Kind:       defaultaggregator.LastKind,
+						OutputName: constnames.TcpRttMetricName,
+					}},
 					requestTimeHistogramTopologyMetric: {{
 						Kind:               defaultaggregator.HistogramKind,
 						OutputName:         requestTimeHistogramTopologyMetric,
@@ -87,6 +92,26 @@ func newCollector(config *Config, _ *component.TelemetryLogger) *collector {
 						Kind:               defaultaggregator.HistogramKind,
 						OutputName:         requestTimeHistogramEntityMetric,
 						ExplicitBoundaries: []int64{10e6, 20e6, 50e6, 80e6, 130e6, 200e6, 300e6, 400e6, 500e6, 700e6, 1000e6, 2000e6, 5000e6, 30000e6},
+					}},
+					constnames.ProfilingCpuDurationMetric: {{
+						Kind:               defaultaggregator.HistogramKind,
+						OutputName:         constnames.ProfilingCpuDurationMetric,
+						ExplicitBoundaries: profilingBoundaries,
+					}},
+					constnames.ProfilingNetDurationMetric: {{
+						Kind:               defaultaggregator.HistogramKind,
+						OutputName:         constnames.ProfilingNetDurationMetric,
+						ExplicitBoundaries: profilingBoundaries,
+					}},
+					constnames.ProfilingFileDurationMetric: {{
+						Kind:               defaultaggregator.HistogramKind,
+						OutputName:         constnames.ProfilingFileDurationMetric,
+						ExplicitBoundaries: profilingBoundaries,
+					}},
+					constnames.ProfilingFutexDurationMetric: {{
+						Kind:               defaultaggregator.HistogramKind,
+						OutputName:         constnames.ProfilingFutexDurationMetric,
+						ExplicitBoundaries: profilingBoundaries,
 					}},
 				},
 			}, time.Minute*5)}
