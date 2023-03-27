@@ -43,6 +43,16 @@ analyzers:
     # edge_events_window_size is the size of the duration window that seats the edge events.
     # The unit is second. The greater it is, the more data will be stored.
     edge_events_window_size: 2
+    # sample_trace_repeat_num is the times of recheck trace is sampled.
+    sample_trace_repeat_num: 3
+    # Set the max wait time for sampled traceIds.
+    sample_trace_wait_time: 30
+    # Set duration for save 1 trace after hit same url.
+    sample_url_hit_duration: 5
+    # Set Receiver Ip
+    receiver_ip: 127.0.0.1
+    # Set Receiver Ip
+    receiver_port: 29090
   tcpconnectanalyzer:
     channel_size: 10000
     wait_event_second: 10

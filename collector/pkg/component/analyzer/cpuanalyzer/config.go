@@ -20,6 +20,18 @@ type Config struct {
 	// EdgeEventsWindowSize is the size of the duration window that seats the edge events.
 	// The unit is seconds. The greater it is, the more data will be stored.
 	EdgeEventsWindowSize int `mapstructure:"edge_events_window_size"`
+	// Set RepeatNum for Trace Sampling as Tail Trace may set traceId later.
+	SampleTraceRepeatNum int `mapstructure:"sample_trace_repeat_num"`
+	// Set Max wait time for sampled traceId info, the rootTrace may return aftern Ns.
+	// The unit is seconds.
+	SampleTraceWaitTime int `mapstructure:"sample_trace_wait_time"`
+	// The same url will be sampled once in hit duration.
+	// The unit is seconds.
+	SampleUrlHitDuration int `mapstructure:"sample_url_hit_duration"`
+	// The Receiver Ip
+	ReceiverIp string `mapstructure:"receiver_ip"`
+	// The Receiver Port
+	ReceiverPort int `mapstructure:"receiver_port"`
 }
 
 func NewDefaultConfig() *Config {

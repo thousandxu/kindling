@@ -9,8 +9,10 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/metadata/kubernetes"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
+	"google.golang.org/grpc"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/Kindling-project/kindling/collector/pkg/component"
@@ -35,7 +37,7 @@ type CpuAnalyzer struct {
 	tidExpiredQueue      *tidDeleteQueue
 	javaTraces           map[string]*TransactionIdEvent
 	nextConsumers        []consumer.Consumer
-	metadata             *kubernetes.K8sMetaDataCache
+	sampleCache          *SampleCache
 }
 
 func (ca *CpuAnalyzer) Type() analyzer.Type {
@@ -48,18 +50,32 @@ func (ca *CpuAnalyzer) ConsumableEvents() []string {
 
 func NewCpuAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, consumers []consumer.Consumer) analyzer.Analyzer {
 	config, _ := cfg.(*Config)
+
+	conn, err := grpc.Dial(config.ReceiverIp+":"+strconv.Itoa(config.ReceiverPort), grpc.WithInsecure())
+	if err != nil {
+		if ce := telemetry.Logger.Check(zapcore.WarnLevel, "Fail to Create GrpcClient: "); ce != nil {
+			ce.Write(
+				zap.String("ip", config.ReceiverIp),
+				zap.Error(err),
+			)
+		}
+		return nil
+	}
+
 	ca := &CpuAnalyzer{
 		cfg:           config,
 		telemetry:     telemetry,
 		nextConsumers: consumers,
 		routineSize:   atomic.NewInt32(0),
-		metadata:      kubernetes.MetaDataCache,
+		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), config.JavaTraceSlowTime, config.SampleTraceWaitTime, config.SampleUrlHitDuration, kubernetes.MetaDataCache),
 	}
 	ca.cpuPidEvents = make(map[uint32]map[uint32]*TimeSegments, 100000)
 	ca.tidExpiredQueue = newTidDeleteQueue()
 	ca.javaTraces = make(map[string]*TransactionIdEvent, 100000)
 	go ca.TidDelete(30*time.Second, 10*time.Second)
 	go ca.sampleSend()
+	go ca.sampleCache.loopCheckTailBaseTraces()
+	go ca.sampleCache.loopSendAndRecvTraces()
 	newSelfMetrics(telemetry.MeterProvider, ca)
 	return ca
 }
@@ -132,34 +148,25 @@ func (ca *CpuAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 		ca.javaTraces[ev.TraceId+ev.PidString] = ev
 	} else {
 		oldEvent := ca.javaTraces[ev.TraceId+ev.PidString]
-		pid, _ := strconv.ParseInt(ev.PidString, 10, 64)
-		spendTime := ev.Timestamp - oldEvent.Timestamp
-		contentKey := oldEvent.Url
-		if oldEvent != nil && spendTime > uint64(ca.cfg.JavaTraceSlowTime)*uint64(time.Millisecond) {
-			protocol := oldEvent.Protocol
-			labels := model.NewAttributeMapWithValues(map[string]model.AttributeValue{
-				constlabels.IsSlow:         model.NewBoolValue(true),
-				constlabels.Pid:            model.NewIntValue(pid),
-				constlabels.Protocol:       model.NewStringValue(protocol),
-				constlabels.ContentKey:     model.NewStringValue(contentKey),
-				"isInstallApm":             model.NewBoolValue(true),
-				constlabels.IsServer:       model.NewBoolValue(true),
-				constlabels.HttpApmTraceId: model.NewStringValue(ev.TraceId),
-			})
-			if protocol == "http" {
-				labels.AddStringValue(constlabels.HttpUrl, contentKey)
-			}
-			if kubernetes.IsInitSuccess {
-				k8sInfo, ok := ca.metadata.GetByContainerId(ev.ContainerId)
-				if ok {
-					labels.AddStringValue(constlabels.DstWorkloadName, k8sInfo.RefPodInfo.WorkloadName)
-					labels.AddStringValue(constlabels.DstContainer, k8sInfo.Name)
-					labels.AddStringValue(constlabels.DstPod, k8sInfo.RefPodInfo.PodName)
-				}
-			}
-			metric := model.NewIntMetric(constvalues.RequestTotalTime, int64(spendTime))
-			dataGroup := model.NewDataGroup(constnames.SpanEvent, labels, oldEvent.Timestamp, metric)
-			ReceiveDataGroupAsSignal(dataGroup)
+		if oldEvent == nil {
+			return
+		}
+		if oldEvent.ThreadType > 0 {
+			// 丢弃非业务线程数据.
+			return
+		}
+
+		sampleTrace := NewSampleTrace(oldEvent, ev, ca.cfg.SampleTraceRepeatNum)
+		if ca.sampleCache.isSampled(sampleTrace) {
+			// 保存Trace 和 Profiling
+			ca.sampleCache.storeProfiling(sampleTrace)
+			ca.sampleCache.storeTrace(sampleTrace)
+		} else if ca.sampleCache.isTailBaseSampled(sampleTrace) {
+			// 只保留Trace数据
+			ca.sampleCache.storeTrace(sampleTrace)
+		} else {
+			// 非错 或 慢 或 URL5s内已采中, 将数据存储到SampleCache中
+			ca.sampleCache.cacheSampleTrace(sampleTrace)
 		}
 	}
 }
