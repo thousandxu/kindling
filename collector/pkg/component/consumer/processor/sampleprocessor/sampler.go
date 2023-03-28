@@ -1,4 +1,4 @@
-package cpuanalyzer
+package sampleprocessor
 
 import (
 	"context"
@@ -6,16 +6,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kindling-project/kindling/collector/pkg/metadata/kubernetes"
+	"github.com/Kindling-project/kindling/collector/pkg/component"
+	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/cpuanalyzer"
+	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
-	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
 )
 
 type SampleTrace struct {
 	dataGroup *model.DataGroup
 	traceId   string
-	hasError  bool
 	repeatNum int
 }
 
@@ -25,10 +25,9 @@ func (sampleTrace *SampleTrace) getPidUrl() string {
 		sampleTrace.dataGroup.Labels.GetStringValue(constlabels.ContentKey))
 }
 
-func NewSampleTrace(dataGroup *model.DataGroup, hasError bool, repeatNum int) *SampleTrace {
+func NewSampleTrace(dataGroup *model.DataGroup, repeatNum int) *SampleTrace {
 	return &SampleTrace{
 		dataGroup: dataGroup,
-		hasError:  hasError,
 		traceId:   dataGroup.Labels.GetStringValue(constlabels.HttpApmTraceId),
 		repeatNum: repeatNum,
 	}
@@ -46,57 +45,45 @@ type SampleCache struct {
 	// 命中采样的URL记录<url, lastTime>，每个url缓存urlHitDuration毫秒.
 	urlHits sync.Map
 	// 缓存所需配置
-	slowThreshold  int64  // 慢请求阈值(ms)
 	traceHoldTime  uint64 // 一个采样TraceId等待N(ms)，该时间段内接收的该TraceId数据都保存.
 	urlHitDuration uint64 // 保存某个URL N(ms)，该时间段内该URL不会被采样命中.
-	traceRetryNum  int    // TailBase重试次数
 	// Grpc调用API
 	client    model.TraceIdServiceClient
 	queryTime int64
-	metadata  *kubernetes.K8sMetaDataCache
+	// 日志输出
+	telemetry *component.TelemetryTools
+	// 保存Trace数据
+	nextConsumer consumer.Consumer
 }
 
-func NewSampleCache(client model.TraceIdServiceClient, slowThreshold int, traceHoldTime int, urlHitDuration int, traceRetryNum int) *SampleCache {
+func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
 	return &SampleCache{
 		traceCache:     make([]*SampleTrace, 0),
 		notifyTraceIds: make([]string, 0),
-		slowThreshold:  int64(slowThreshold) * int64(time.Millisecond),
-		traceHoldTime:  uint64(traceHoldTime) * uint64(time.Millisecond),
-		urlHitDuration: uint64(urlHitDuration) * uint64(time.Millisecond),
-		traceRetryNum:  traceRetryNum,
+		traceHoldTime:  uint64(cfg.SampleTraceWaitTime) * 1000,
+		urlHitDuration: uint64(cfg.SampleUrlHitDuration) * 1000,
 		client:         client,
 		queryTime:      0,
-	}
-}
-
-func (cache *SampleCache) Sample(dataGroup *model.DataGroup, hasError bool) {
-	sampleTrace := NewSampleTrace(dataGroup, hasError, cache.traceRetryNum)
-	if cache.isSampled(sampleTrace) {
-		// 保存Trace 和 Profiling
-		cache.storeProfiling(sampleTrace)
-		cache.storeTrace(sampleTrace)
-	} else if cache.isTailBaseSampled(sampleTrace) {
-		// 只保留Trace数据
-		cache.storeTrace(sampleTrace)
-	} else {
-		// 非错 或 慢 或 URL5s内已采中, 将数据存储到SampleCache中
-		cache.cacheSampleTrace(sampleTrace)
+		telemetry:      telemetry,
+		nextConsumer:   nextConsumer,
 	}
 }
 
 func (cache *SampleCache) isTailBaseSampled(sampleTrace *SampleTrace) bool {
-	_, ok := cache.sampledTraceIds.Load(sampleTrace.traceId)
-	return ok
+	if _, ok := cache.sampledTraceIds.Load(sampleTrace.traceId); ok {
+		cache.telemetry.Logger.Warnf("Trace is stored by tailBase: traceId[%s]", sampleTrace.traceId)
+		return ok
+	}
+	return false
 }
 
 func (cache *SampleCache) isSampled(sampleTrace *SampleTrace) bool {
 	if _, ok := cache.urlHits.Load(sampleTrace.getPidUrl()); ok {
+		cache.telemetry.Logger.Warnf("Ignore: Trace By Url[%s]", sampleTrace.getPidUrl())
 		return false
 	}
-	if sampleTrace.hasError {
-		return true
-	}
-	return sampleTrace.dataGroup.Labels.GetIntValue(constvalues.RequestTotalTime) >= cache.slowThreshold
+	return sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsError) ||
+		sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsSlow)
 }
 
 func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
@@ -117,11 +104,17 @@ func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 		cache.notifyLock.Unlock()
 	}
 	// 保存Profiling数据
-	ReceiveProfilingSignal(sampleTrace.dataGroup)
+	cpuanalyzer.ReceiveProfilingSignal(sampleTrace.dataGroup)
+
+	cache.telemetry.Logger.Infof("Store Profiling: TraceId[%s]", sampleTrace.traceId)
 }
 
 func (cache *SampleCache) storeTrace(sampleTrace *SampleTrace) {
-	// TODO 保存SampleTrace数据
+	// 保存SampleTrace数据
+	// 修改 dataGroup Name
+	// sampleTrace.dataGroup.Name = ""
+	cache.telemetry.Logger.Infof("Store Trace: %v", sampleTrace.dataGroup)
+	cache.nextConsumer.Consume(sampleTrace.dataGroup)
 }
 
 func (cache *SampleCache) loopCheckTailBaseTraces() {
@@ -141,6 +134,7 @@ func (cache *SampleCache) checkTailBaseTraces() {
 	cache.sampledTraceIds.Range(func(k, v interface{}) bool {
 		time := v.(uint64)
 		if now > time+cache.traceHoldTime {
+			cache.telemetry.Logger.Infof("Delete Old TraceId: %s", k.(string))
 			cache.sampledTraceIds.Delete(k)
 		}
 		return true
@@ -150,6 +144,7 @@ func (cache *SampleCache) checkTailBaseTraces() {
 	cache.urlHits.Range(func(k, v interface{}) bool {
 		time := v.(uint64)
 		if now > time+cache.urlHitDuration {
+			cache.telemetry.Logger.Infof("Delete Old Url: %s", k.(string))
 			cache.urlHits.Delete(k)
 		}
 		return true
@@ -211,7 +206,8 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 		QueryTime: cache.queryTime,
 		TraceIds:  sampledTraceIds,
 	}
-	result, err := cache.client.SendTraceIds(context.Background(), traceIds)
+	ctx, _ := context.WithTimeout(context.Background(), time.Second)
+	result, err := cache.client.SendTraceIds(ctx, traceIds)
 	if err != nil {
 		fmt.Printf("Send TraceIds failed%v\n", err)
 		return

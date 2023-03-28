@@ -14,6 +14,7 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/network"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/tcpconnectanalyzer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/tcpmetricanalyzer"
+	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/traceidanalyzer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/cameraexporter"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/logexporter"
@@ -21,6 +22,7 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/exporter/prometheusexporter"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor/aggregateprocessor"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor/k8sprocessor"
+	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor/sampleprocessor"
 	"github.com/Kindling-project/kindling/collector/pkg/component/controller"
 	"github.com/Kindling-project/kindling/collector/pkg/component/receiver"
 	"github.com/Kindling-project/kindling/collector/pkg/component/receiver/cgoreceiver"
@@ -79,7 +81,9 @@ func (a *Application) registerFactory() {
 	a.componentsFactory.RegisterReceiver(cgoreceiver.Cgo, cgoreceiver.NewCgoReceiver, &cgoreceiver.Config{})
 	a.componentsFactory.RegisterAnalyzer(network.Network.String(), network.NewNetworkAnalyzer, network.NewDefaultConfig())
 	a.componentsFactory.RegisterAnalyzer(cpuanalyzer.CpuProfile.String(), cpuanalyzer.NewCpuAnalyzer, cpuanalyzer.NewDefaultConfig())
+	a.componentsFactory.RegisterAnalyzer(traceidanalyzer.TraceId.String(), traceidanalyzer.NewTraceIdAnalyzer, traceidanalyzer.NewDefaultConfig())
 	a.componentsFactory.RegisterProcessor(k8sprocessor.K8sMetadata, k8sprocessor.NewKubernetesProcessor, &k8sprocessor.DefaultConfig)
+	a.componentsFactory.RegisterProcessor(sampleprocessor.Sample, sampleprocessor.New, sampleprocessor.NewDefaultConfig())
 	a.componentsFactory.RegisterExporter(otelexporter.Otel, otelexporter.NewExporter, &otelexporter.Config{})
 	a.componentsFactory.RegisterAnalyzer(tcpmetricanalyzer.TcpMetric.String(), tcpmetricanalyzer.NewTcpMetricAnalyzer, &tcpmetricanalyzer.Config{})
 	a.componentsFactory.RegisterExporter(logexporter.Type, logexporter.New, &logexporter.Config{})
@@ -120,6 +124,10 @@ func (a *Application) buildPipeline() error {
 	// 2. Kubernetes metadata processor
 	k8sProcessorFactory := a.componentsFactory.Processors[k8sprocessor.K8sMetadata]
 	k8sMetadataProcessor := k8sProcessorFactory.NewFunc(k8sProcessorFactory.Config, a.telemetry.GetTelemetryTools(k8sprocessor.K8sMetadata), aggregateProcessor)
+	// 3. Sampler processor
+	sampleProcessorFactory := a.componentsFactory.Processors[sampleprocessor.Sample]
+	sampleProcessor := sampleProcessorFactory.NewFunc(sampleProcessorFactory.Config, a.telemetry.GetTelemetryTools(sampleprocessor.Sample), otelExporter)
+
 	// Initialize all analyzers
 	// 1. Common network request analyzer
 	networkAnalyzerFactory := a.componentsFactory.Analyzers[network.Network.String()]
@@ -142,8 +150,12 @@ func (a *Application) buildPipeline() error {
 	cpuAnalyzerFactory := a.componentsFactory.Analyzers[cpuanalyzer.CpuProfile.String()]
 	cpuAnalyzer := cpuAnalyzerFactory.NewFunc(cpuAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(cpuanalyzer.CpuProfile.String()), []consumer.Consumer{aggregateProcessorForProfiling, cameraExporter})
 
+	// TraceId analyzer pipeline
+	traceIdAnalyzerFactory := a.componentsFactory.Analyzers[traceidanalyzer.TraceId.String()]
+	traceidAnalyzer := traceIdAnalyzerFactory.NewFunc(traceIdAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(traceidanalyzer.TraceId.String()), []consumer.Consumer{aggregateProcessor, sampleProcessor})
+
 	// Initialize receiver packaged with multiple analyzers
-	analyzerManager, err := analyzer.NewManager(networkAnalyzer, tcpAnalyzer, tcpConnectAnalyzer, cpuAnalyzer)
+	analyzerManager, err := analyzer.NewManager(networkAnalyzer, tcpAnalyzer, tcpConnectAnalyzer, cpuAnalyzer, traceidAnalyzer)
 	if err != nil {
 		return fmt.Errorf("error happened while creating analyzer manager: %w", err)
 	}

@@ -14,7 +14,8 @@ import (
 
 var (
 	enableProfile         bool
-	once                  sync.Once
+	profilingOnce         sync.Once
+	metricsOnce           sync.Once
 	metricsTriggerChan    chan *model.DataGroup
 	profilingTriggerChan  chan SendTriggerEvent
 	abnormalInnerCallChan chan *model.DataGroup
@@ -28,7 +29,7 @@ func init() {
 
 func ReceiveProfilingSignal(data *model.DataGroup) {
 	if !enableProfile {
-		once.Do(func() {
+		profilingOnce.Do(func() {
 			// We must close the channel at the sender-side.
 			// Otherwise, we need complex codes to handle it.
 			if profilingTriggerChan != nil {
@@ -37,17 +38,22 @@ func ReceiveProfilingSignal(data *model.DataGroup) {
 		})
 		return
 	}
-	// We save the trace to sampleMap to make it as the sending trigger event.
-	pidString := strconv.FormatInt(data.Labels.GetIntValue("pid"), 10)
-	// The data is unnecessary to be cloned as it won't be reused.
-	sampleMap.LoadOrStore(data.Labels.GetStringValue(constlabels.ContentKey)+pidString, data)
+	if duration, ok := data.GetMetric(constvalues.RequestTotalTime); ok {
+		event := SendTriggerEvent{
+			Pid:          uint32(data.Labels.GetIntValue("pid")),
+			StartTime:    data.Timestamp,
+			SpendTime:    uint64(duration.GetInt().Value),
+			OriginalData: data,
+		}
+		profilingTriggerChan <- event
+	}
 }
 
 // ReceiveDataGroupAsSignal receives model.DataGroup as a signal.
 // Signal is used to trigger to send CPU on/off events
 func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 	if !enableProfile {
-		once.Do(func() {
+		metricsOnce.Do(func() {
 			// We must close the channel at the sender-side.
 			// Otherwise, we need complex codes to handle it.
 			if metricsTriggerChan != nil {

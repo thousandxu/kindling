@@ -17,7 +17,8 @@ func (ca *CpuAnalyzer) StartProfile() error {
 	profilingTriggerChan = make(chan SendTriggerEvent, 3e5)
 	abnormalInnerCallChan = make(chan *model.DataGroup, 1e4)
 	enableProfile = true
-	once = sync.Once{}
+	profilingOnce = sync.Once{}
+	metricsOnce = sync.Once{}
 	go ca.ReadProfilingTriggerChan()
 	go ca.ReadMetricsTriggerChan()
 	go ca.ReadTraceChan()

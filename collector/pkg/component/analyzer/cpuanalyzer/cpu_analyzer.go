@@ -8,13 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kindling-project/kindling/collector/pkg/metadata/kubernetes"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
-	"google.golang.org/grpc"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/Kindling-project/kindling/collector/pkg/component"
@@ -39,8 +36,6 @@ type CpuAnalyzer struct {
 	tidExpiredQueue      *tidDeleteQueue
 	javaTraces           map[string]*TransactionIdEvent
 	nextConsumers        []consumer.Consumer
-	metadata             *kubernetes.K8sMetaDataCache
-	sampleCache          *SampleCache
 }
 
 func (ca *CpuAnalyzer) Type() analyzer.Type {
@@ -53,33 +48,17 @@ func (ca *CpuAnalyzer) ConsumableEvents() []string {
 
 func NewCpuAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, consumers []consumer.Consumer) analyzer.Analyzer {
 	config, _ := cfg.(*Config)
-
-	conn, err := grpc.Dial(config.ReceiverIp+":"+strconv.Itoa(config.ReceiverPort), grpc.WithInsecure())
-	if err != nil {
-		if ce := telemetry.Logger.Check(zapcore.WarnLevel, "Fail to Create GrpcClient: "); ce != nil {
-			ce.Write(
-				zap.String("ip", config.ReceiverIp),
-				zap.Error(err),
-			)
-		}
-		return nil
-	}
-
 	ca := &CpuAnalyzer{
 		cfg:           config,
 		telemetry:     telemetry,
 		nextConsumers: consumers,
 		routineSize:   atomic.NewInt32(0),
-		metadata:      kubernetes.MetaDataCache,
-		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), config.JavaTraceSlowTime, config.SampleTraceWaitTime, config.SampleUrlHitDuration, config.SampleTraceRepeatNum),
 	}
 	ca.cpuPidEvents = make(map[uint32]map[uint32]*TimeSegments, 100000)
 	ca.tidExpiredQueue = newTidDeleteQueue()
 	ca.javaTraces = make(map[string]*TransactionIdEvent, 100000)
 	go ca.TidDelete(30*time.Second, 10*time.Second)
 	go ca.sampleSend()
-	go ca.sampleCache.loopCheckTailBaseTraces()
-	go ca.sampleCache.loopSendAndRecvTraces()
 	newSelfMetrics(telemetry.MeterProvider, ca)
 	return ca
 }
@@ -146,66 +125,6 @@ func (ca *CpuAnalyzer) ConsumeTransactionIdEvent(event *model.KindlingEvent) {
 	}
 	//ca.sendEventDirectly(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
 	ca.PutEventToSegments(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
-	if ca.cfg.OpenJavaTraceSampling {
-		ca.analyzerJavaTraceTime(ev)
-	}
-}
-
-func (ca *CpuAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
-	tidString := strconv.FormatUint(uint64(ev.Tid), 10)
-	key := ev.TraceId + tidString
-	if ev.IsEntry == 1 {
-		ca.javaTraces[key] = ev
-	} else {
-		entryEvent := ca.javaTraces[key]
-		if entryEvent == nil {
-			ca.telemetry.Logger.Infof("Not find the entry traceid event for TraceID=%s, threadID=%s", ev.TraceId, tidString)
-			return
-		}
-		delete(ca.javaTraces, key)
-
-		if ev.ThreadType != 0 {
-			// 丢弃非业务线程数据.
-			return
-		}
-
-		spendTime := ev.Timestamp - entryEvent.Timestamp
-		var isSlow bool
-		if spendTime > uint64(ca.cfg.JavaTraceSlowTime)*uint64(time.Millisecond) {
-			isSlow = true
-		}
-		contentKey := entryEvent.Url
-		protocol := entryEvent.Protocol
-		labels := model.NewAttributeMapWithValues(map[string]model.AttributeValue{
-			constlabels.IsSlow:         model.NewBoolValue(isSlow),
-			constlabels.Pid:            model.NewIntValue(int64(ev.Pid)),
-			constlabels.Tid:            model.NewIntValue(int64(ev.Tid)),
-			constlabels.Protocol:       model.NewStringValue(protocol),
-			constlabels.ContentKey:     model.NewStringValue(contentKey),
-			"isInstallApm":             model.NewBoolValue(true),
-			constlabels.IsServer:       model.NewBoolValue(true),
-			constlabels.HttpApmTraceId: model.NewStringValue(ev.TraceId),
-			constlabels.ContainerId:    model.NewStringValue(ev.ContainerId),
-			constlabels.EndTime:        model.NewIntValue(int64(ev.Timestamp)),
-		})
-		if protocol == "http" {
-			labels.AddStringValue(constlabels.HttpUrl, contentKey)
-		}
-		if kubernetes.IsInitSuccess {
-			k8sInfo, ok := ca.metadata.GetByContainerId(ev.ContainerId)
-			if ok {
-				labels.AddStringValue(constlabels.DstWorkloadName, k8sInfo.RefPodInfo.WorkloadName)
-				labels.AddStringValue(constlabels.DstContainer, k8sInfo.Name)
-				labels.AddStringValue(constlabels.DstPod, k8sInfo.RefPodInfo.PodName)
-			}
-		}
-		metric := model.NewIntMetric(constvalues.RequestTotalTime, int64(spendTime))
-		dataGroup := model.NewDataGroup(constnames.SpanEvent, labels, entryEvent.Timestamp, metric)
-		ReceiveDataGroupAsSignal(dataGroup)
-
-		// 采样Trace / Profiling数据
-		ca.sampleCache.Sample(dataGroup, ev.Error > 0)
-	}
 }
 
 func (ca *CpuAnalyzer) ConsumeJavaFutexEvent(event *model.KindlingEvent) {
