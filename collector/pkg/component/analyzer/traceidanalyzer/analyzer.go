@@ -106,7 +106,7 @@ func (ta *TraceIdAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 
 		spendTime := ev.Timestamp - entryEvent.Timestamp
 		var isSlow bool
-		if spendTime > uint64(ta.cfg.JavaTraceSlowTime)*1000 {
+		if spendTime > uint64(ta.cfg.JavaTraceSlowTime)*1000000 {
 			isSlow = true
 		}
 		contentKey := entryEvent.Url

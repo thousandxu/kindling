@@ -46,7 +46,7 @@ analyzers:
     # The unit is second. The greater it is, the more data will be stored.
     edge_events_window_size: 2
   traceidanalyzer:
-    # Set Slow Time Threshold.
+    # Set Slow Time Threshold(ms).
     java_trace_slow_time: 500
   tcpconnectanalyzer:
     channel_size: 10000
