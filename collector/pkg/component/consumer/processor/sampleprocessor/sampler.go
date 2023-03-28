@@ -38,8 +38,7 @@ type SampleCache struct {
 	traceLock  sync.RWMutex
 	traceCache []*SampleTrace
 	// 本机采样命中TraceId记录，每秒清空
-	notifyLock     sync.RWMutex
-	notifyTraceIds []string
+	unSendIds *UnSendIds
 	// 全链路需采样的TraceId记录<traceId, sampledTime>，每个TraceId缓存traceHoldTime毫秒.
 	sampledTraceIds sync.Map
 	// 命中采样的URL记录<url, lastTime>，每个url缓存urlHitDuration毫秒.
@@ -59,7 +58,7 @@ type SampleCache struct {
 func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
 	return &SampleCache{
 		traceCache:     make([]*SampleTrace, 0),
-		notifyTraceIds: make([]string, 0),
+		unSendIds:      NewUnSendIds(cfg.SampleTraceRepeatNum),
 		traceHoldTime:  uint64(cfg.SampleTraceWaitTime) * 1000,
 		urlHitDuration: uint64(cfg.SampleUrlHitDuration) * 1000,
 		client:         client,
@@ -99,9 +98,7 @@ func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 	// 记录TraceId采样
 	if _, exist := cache.sampledTraceIds.LoadOrStore(sampleTrace.traceId, now); !exist {
 		// 待转发TraceId列表
-		cache.notifyLock.Lock()
-		cache.notifyTraceIds = append(cache.notifyTraceIds, sampleTrace.traceId)
-		cache.notifyLock.Unlock()
+		cache.unSendIds.cacheIds(sampleTrace.traceId)
 	}
 	// 保存Profiling数据
 	cpuanalyzer.ReceiveProfilingSignal(sampleTrace.dataGroup)
@@ -110,9 +107,7 @@ func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 }
 
 func (cache *SampleCache) storeTrace(sampleTrace *SampleTrace) {
-	// 保存SampleTrace数据
-	// 修改 dataGroup Name
-	// sampleTrace.dataGroup.Name = ""
+	// 保存采样的SpanTrace数据
 	cache.telemetry.Logger.Infof("Store Trace: %v", sampleTrace.dataGroup)
 	cache.nextConsumer.Consume(sampleTrace.dataGroup)
 }
@@ -192,26 +187,23 @@ func (cache *SampleCache) loopSendAndRecvTraces() {
 }
 
 func (cache *SampleCache) sendAndRecvSampledTraces() {
-	sampledTraceIds := []string{}
-	notifyTraceCount := len(cache.notifyTraceIds)
-	if notifyTraceCount > 0 {
-		cache.notifyLock.Lock()
-		// 获取待发送TraceId数据
-		sampledTraceIds = cache.notifyTraceIds[0:notifyTraceCount]
-		// 每次循环清空数据
-		cache.notifyTraceIds = cache.notifyTraceIds[notifyTraceCount:]
-		cache.notifyLock.Unlock()
-	}
+	notifyTraceCount := cache.unSendIds.getToSendCount()
+	// 存在发送失败，缓存Ns数据。当服务端启动后直接发送Ns数据.
 	traceIds := &model.TraceIds{
 		QueryTime: cache.queryTime,
-		TraceIds:  sampledTraceIds,
+		TraceIds:  cache.unSendIds.getToSendIds(notifyTraceCount),
 	}
-	ctx, _ := context.WithTimeout(context.Background(), time.Second)
-	result, err := cache.client.SendTraceIds(ctx, traceIds)
+	result, err := cache.client.SendTraceIds(context.Background(), traceIds)
 	if err != nil {
-		fmt.Printf("Send TraceIds failed%v\n", err)
+		cache.telemetry.Logger.Errorf("Send TraceIds failed: %v", err)
+		cache.unSendIds.markUnSent(notifyTraceCount)
 		return
 	}
+	if notifyTraceCount > 0 {
+		cache.unSendIds.markSent(notifyTraceCount)
+	}
+
+	// 记录最近一次请求的时间
 	cache.queryTime = result.GetQueryTime()
 	if result.GetTraceIds() != nil {
 		now := uint64(time.Now().UnixMilli())
@@ -220,4 +212,66 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 			cache.sampledTraceIds.LoadOrStore(traceId, now)
 		}
 	}
+}
+
+type UnSendIds struct {
+	lock      sync.RWMutex
+	toSendIds []string // 记录未发送记录
+	counts    []int    // 记录每秒数据量.
+	lastNum   int      // 记录上一轮检测时总共有多少数据未发送
+	size      int      // 记录当前有几秒数据未发送，最多存储len(counts)记录
+}
+
+func NewUnSendIds(size int) *UnSendIds {
+	return &UnSendIds{
+		toSendIds: make([]string, 0),
+		counts:    make([]int, size),
+		size:      0,
+	}
+}
+
+func (unSend *UnSendIds) cacheIds(id string) {
+	unSend.lock.Lock()
+	unSend.toSendIds = append(unSend.toSendIds, id)
+	unSend.lock.Unlock()
+}
+
+func (unSend *UnSendIds) markUnSent(num int) {
+	if unSend.size == 0 {
+		unSend.counts[0] = num
+		unSend.size = 1
+		unSend.lastNum = num
+	} else if unSend.size < len(unSend.counts) {
+		unSend.counts[unSend.size] = num - unSend.lastNum
+		unSend.size++
+		unSend.lastNum = num
+	} else {
+		toRemoveSize := unSend.counts[0]
+		if toRemoveSize > 0 {
+			unSend.lock.Lock()
+			unSend.toSendIds = unSend.toSendIds[toRemoveSize:]
+			unSend.lock.Unlock()
+		}
+		// 清除第一个数据，并将数据添加到最后
+		unSend.counts = append(unSend.counts[1:], num-unSend.lastNum)
+		unSend.lastNum = num - toRemoveSize
+	}
+}
+
+func (unSend *UnSendIds) markSent(num int) {
+	unSend.lock.Lock()
+	unSend.toSendIds = unSend.toSendIds[num:]
+	unSend.lock.Unlock()
+
+	// 数组不清空，只重置计数.
+	unSend.size = 0
+	unSend.lastNum = 0
+}
+
+func (unSend *UnSendIds) getToSendCount() int {
+	return len(unSend.toSendIds)
+}
+
+func (unSend *UnSendIds) getToSendIds(size int) []string {
+	return unSend.toSendIds[0:size]
 }
