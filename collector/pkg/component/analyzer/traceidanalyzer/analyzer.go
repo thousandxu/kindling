@@ -117,7 +117,6 @@ func (ta *TraceIdAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 			constlabels.Tid:            model.NewIntValue(int64(ev.Tid)),
 			constlabels.Protocol:       model.NewStringValue(protocol),
 			constlabels.ContentKey:     model.NewStringValue(contentKey),
-			"isInstallApm":             model.NewBoolValue(true),
 			constlabels.IsServer:       model.NewBoolValue(true),
 			constlabels.IsError:        model.NewBoolValue(ev.Error > 0),
 			constlabels.HttpApmTraceId: model.NewStringValue(ev.TraceId),

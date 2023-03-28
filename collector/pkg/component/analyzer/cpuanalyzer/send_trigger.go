@@ -65,8 +65,7 @@ func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 		})
 		return
 	}
-	isFromApm := data.Labels.GetBoolValue("isInstallApm")
-	if isFromApm {
+	if data.Name == constnames.SpanTraceGroupName {
 		isInstallApm[uint64(data.Labels.GetIntValue("pid"))] = true
 		// Trigger the metric extraction using the key thread
 		metricsTriggerChan <- data.Clone()
