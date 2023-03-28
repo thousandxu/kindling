@@ -53,6 +53,7 @@ func NewExporter(config interface{}, telemetry *component.TelemetryTools) export
 		constnames.TcpRetransmitMetricGroupName,
 		constnames.TcpDropMetricGroupName,
 		constnames.ProfilingMetricsGroupName,
+		constnames.SpanTraceGroupName,
 	}, nil)
 
 	prometheusExporter := &prometheusExporter{

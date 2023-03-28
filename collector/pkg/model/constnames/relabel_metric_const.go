@@ -42,6 +42,8 @@ const (
 	ProfilingNetDurationMetric   = "kindling_profiling_net_duration_nanoseconds"
 	ProfilingFileDurationMetric  = "kindling_profiling_file_duration_nanoseconds"
 	ProfilingFutexDurationMetric = "kindling_profiling_futex_duration_nanoseconds"
+
+	SpanTraceDurationMetric = "kindling_span_trace_duration_nanoseconds"
 )
 
 const (

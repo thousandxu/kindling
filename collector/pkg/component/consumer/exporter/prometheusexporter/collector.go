@@ -75,6 +75,7 @@ func newCollector(_ *Config, _ *component.TelemetryLogger) *collector {
 	requestTimeHistogramTopologyMetric := constnames.ToKindlingNetMetricName(constvalues.RequestTimeHistogram, false)
 	requestTimeHistogramEntityMetric := constnames.ToKindlingNetMetricName(constvalues.RequestTimeHistogram, true)
 	profilingBoundaries := []int64{5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000}
+	requestDurationBoundaries := []int64{10000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 350000000, 400000000, 450000000, 500000000, 600000000, 800000000, 1200000000, 3000000000, 5000000000}
 	return &collector{
 		aggregator: defaultaggregator.NewCumulativeAggregator(
 			&defaultaggregator.AggregatedConfig{
@@ -112,6 +113,11 @@ func newCollector(_ *Config, _ *component.TelemetryLogger) *collector {
 						Kind:               defaultaggregator.HistogramKind,
 						OutputName:         constnames.ProfilingFutexDurationMetric,
 						ExplicitBoundaries: profilingBoundaries,
+					}},
+					constnames.SpanTraceGroupName: {{
+						Kind:               defaultaggregator.HistogramKind,
+						OutputName:         constnames.SpanTraceGroupName,
+						ExplicitBoundaries: requestDurationBoundaries,
 					}},
 				},
 			}, time.Minute*5)}

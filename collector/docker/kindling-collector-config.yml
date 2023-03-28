@@ -165,6 +165,9 @@ processors:
       kindling_profiling_futex_duration_nanoseconds:
         - kind: histogram
           explicit_boundaries: [5000000, 10000000, 20000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 400000000, 500000000, 800000000, 1200000000, 3000000000, 5000000000]
+      kindling_span_trace_duration_nanoseconds:
+        - kind: histogram
+          explicit_boundaries: [10000000, 30000000, 50000000, 80000000, 100000000, 150000000, 200000000, 300000000, 350000000, 400000000, 450000000, 500000000, 600000000, 800000000, 1200000000, 3000000000, 5000000000]
     sampling_rate:
       normal_data: 0
       slow_data: 100

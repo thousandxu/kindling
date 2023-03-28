@@ -33,6 +33,7 @@ type AggregateProcessor struct {
 	netRequestLabelSelectors *aggregator.LabelSelectors
 	tcpLabelSelectors        *aggregator.LabelSelectors
 	profilingLabelSelectors  *aggregator.LabelSelectors
+	spanTraceLabelSelectors  *aggregator.LabelSelectors
 	stopCh                   chan struct{}
 	ticker                   *time.Ticker
 }
@@ -48,6 +49,7 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 		netRequestLabelSelectors: newNetRequestLabelSelectors(),
 		tcpLabelSelectors:        newTcpLabelSelectors(),
 		profilingLabelSelectors:  newCpuLabelSelectors(),
+		spanTraceLabelSelectors:  newSpanTraceLabelSelectors(),
 		stopCh:                   make(chan struct{}),
 		ticker:                   time.NewTicker(time.Duration(cfg.TickerInterval) * time.Second),
 	}
@@ -140,10 +142,27 @@ func (p *AggregateProcessor) Consume(dataGroup *model.DataGroup) error {
 	case constnames.ProfilingMetricsGroupName:
 		p.aggregator.Aggregate(dataGroup, p.profilingLabelSelectors)
 		return nil
+	case constnames.SpanTraceGroupName:
+		p.aggregator.Aggregate(dataGroup, p.spanTraceLabelSelectors)
+		return nil
 	default:
 		// If not specified, just pass through
 		return nil
 	}
+}
+
+func newSpanTraceLabelSelectors() *aggregator.LabelSelectors {
+	return aggregator.NewLabelSelectors(
+		aggregator.LabelSelector{Name: constlabels.Pid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.Protocol, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.ContentKey, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.IsServer, VType: aggregator.BooleanType},
+		aggregator.LabelSelector{Name: constlabels.IsError, VType: aggregator.BooleanType},
+		aggregator.LabelSelector{Name: constlabels.ContainerId, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstWorkloadName, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstContainer, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.DstPod, VType: aggregator.StringType},
+	)
 }
 
 // TODO: make it configurable instead of hard-coded

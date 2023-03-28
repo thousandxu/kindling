@@ -11,7 +11,6 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
-	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
 )
 
 const (
@@ -136,8 +135,8 @@ func (ta *TraceIdAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 				labels.AddStringValue(constlabels.DstPod, k8sInfo.RefPodInfo.PodName)
 			}
 		}
-		metric := model.NewIntMetric(constvalues.RequestTotalTime, int64(spendTime))
-		dataGroup := model.NewDataGroup(constnames.SpanEvent, labels, entryEvent.Timestamp, metric)
+		metric := model.NewIntMetric(constnames.SpanTraceDurationMetric, int64(spendTime))
+		dataGroup := model.NewDataGroup(constnames.SpanTraceGroupName, labels, entryEvent.Timestamp, metric)
 		// 发送Metric触发器.
 		cpuanalyzer.ReceiveDataGroupAsSignal(dataGroup)
 

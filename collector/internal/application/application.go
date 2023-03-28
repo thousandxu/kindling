@@ -126,7 +126,7 @@ func (a *Application) buildPipeline() error {
 	k8sMetadataProcessor := k8sProcessorFactory.NewFunc(k8sProcessorFactory.Config, a.telemetry.GetTelemetryTools(k8sprocessor.K8sMetadata), aggregateProcessor)
 	// 3. Sampler processor
 	sampleProcessorFactory := a.componentsFactory.Processors[sampleprocessor.Sample]
-	sampleProcessor := sampleProcessorFactory.NewFunc(sampleProcessorFactory.Config, a.telemetry.GetTelemetryTools(sampleprocessor.Sample), otelExporter)
+	sampleProcessor := sampleProcessorFactory.NewFunc(sampleProcessorFactory.Config, a.telemetry.GetTelemetryTools(sampleprocessor.Sample), cameraExporter)
 
 	// Initialize all analyzers
 	// 1. Common network request analyzer
@@ -152,10 +152,10 @@ func (a *Application) buildPipeline() error {
 
 	// TraceId analyzer pipeline
 	traceIdAnalyzerFactory := a.componentsFactory.Analyzers[traceidanalyzer.TraceId.String()]
-	traceidAnalyzer := traceIdAnalyzerFactory.NewFunc(traceIdAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(traceidanalyzer.TraceId.String()), []consumer.Consumer{aggregateProcessor, sampleProcessor})
+	traceIdAnalyzer := traceIdAnalyzerFactory.NewFunc(traceIdAnalyzerFactory.Config, a.telemetry.GetTelemetryTools(traceidanalyzer.TraceId.String()), []consumer.Consumer{aggregateProcessorForProfiling, sampleProcessor})
 
 	// Initialize receiver packaged with multiple analyzers
-	analyzerManager, err := analyzer.NewManager(networkAnalyzer, tcpAnalyzer, tcpConnectAnalyzer, cpuAnalyzer, traceidAnalyzer)
+	analyzerManager, err := analyzer.NewManager(networkAnalyzer, tcpAnalyzer, tcpConnectAnalyzer, cpuAnalyzer, traceIdAnalyzer)
 	if err != nil {
 		return fmt.Errorf("error happened while creating analyzer manager: %w", err)
 	}
