@@ -114,9 +114,9 @@ func newCollector(_ *Config, _ *component.TelemetryLogger) *collector {
 						OutputName:         constnames.ProfilingFutexDurationMetric,
 						ExplicitBoundaries: profilingBoundaries,
 					}},
-					constnames.SpanTraceGroupName: {{
+					constnames.SpanTraceDurationMetric: {{
 						Kind:               defaultaggregator.HistogramKind,
-						OutputName:         constnames.SpanTraceGroupName,
+						OutputName:         constnames.SpanTraceDurationMetric,
 						ExplicitBoundaries: requestDurationBoundaries,
 					}},
 				},
