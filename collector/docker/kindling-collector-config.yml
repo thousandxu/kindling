@@ -35,8 +35,6 @@ receivers:
       - name: tracepoint-procexit
 analyzers:
   cpuanalyzer:
-    # open_java_trace_sampling is the switch for whether to use Java-Trace to trigger sampling.
-    open_java_trace_sampling: false
     # sampling_interval is the sampling interval for the same url. The unit is second.
     sampling_interval: 5
     # segment_size defines how many segments(seconds) can be cached to wait for sending.
@@ -46,6 +44,8 @@ analyzers:
     # The unit is second. The greater it is, the more data will be stored.
     edge_events_window_size: 2
   traceidanalyzer:
+    # open_java_trace_sampling is the switch for whether to use Java-Trace to trigger sampling.
+    open_java_trace_sampling: true
     # Set Slow Time Threshold(ms).
     java_trace_slow_time: 500
   tcpconnectanalyzer:

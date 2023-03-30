@@ -54,6 +54,9 @@ func (ta *TraceIdAnalyzer) Shutdown() error {
 }
 
 func (ta *TraceIdAnalyzer) ConsumeEvent(event *model.KindlingEvent) error {
+	if !ta.cfg.OpenJavaTraceSampling {
+		return nil
+	}
 	isEntry, _ := strconv.ParseUint(event.GetStringUserAttribute("is_enter"), 10, 32)
 	var ev *TransactionIdEvent
 	if isEntry == 1 {

@@ -1,16 +1,9 @@
 package cpuanalyzer
 
-const (
-	defaultSegmentSize = 40
-)
-
 type Config struct {
 	// SamplingInterval is the sampling interval for the same url.
 	// The unit is seconds.
 	SamplingInterval int `mapstructure:"sampling_interval"`
-	// OpenJavaTraceSampling a switch for whether to use Java-Trace to trigger sampling.
-	// The default is false.
-	OpenJavaTraceSampling bool `mapstructure:"open_java_trace_sampling"`
 	// SegmentSize defines how many segments(seconds) can be cached to wait for sending.
 	// The elder segments will be overwritten by the newer ones, so don't set it too low.
 	SegmentSize int `mapstructure:"segment_size"`
@@ -21,9 +14,8 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		SamplingInterval:      5,
-		OpenJavaTraceSampling: false,
-		SegmentSize:           40,
-		EdgeEventsWindowSize:  2,
+		SamplingInterval:     5,
+		SegmentSize:          40,
+		EdgeEventsWindowSize: 2,
 	}
 }
