@@ -74,7 +74,7 @@ func (ca *CpuAnalyzer) Shutdown() error {
 }
 
 func (ca *CpuAnalyzer) ConsumeEvent(event *model.KindlingEvent) error {
-	if !enableProfile {
+	if !EnableProfile {
 		return nil
 	}
 	switch event.Name {

@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	enableProfile         bool
+	EnableProfile         bool
 	profilingOnce         sync.Once
 	metricsOnce           sync.Once
 	metricsTriggerChan    chan *model.DataGroup
@@ -28,7 +28,7 @@ func init() {
 }
 
 func ReceiveProfilingSignal(data *model.DataGroup) {
-	if !enableProfile {
+	if !EnableProfile {
 		profilingOnce.Do(func() {
 			// We must close the channel at the sender-side.
 			// Otherwise, we need complex codes to handle it.
@@ -52,7 +52,7 @@ func ReceiveProfilingSignal(data *model.DataGroup) {
 // ReceiveDataGroupAsSignal receives model.DataGroup as a signal.
 // Signal is used to trigger to send CPU on/off events
 func ReceiveDataGroupAsSignal(data *model.DataGroup) {
-	if !enableProfile {
+	if !EnableProfile {
 		metricsOnce.Do(func() {
 			// We must close the channel at the sender-side.
 			// Otherwise, we need complex codes to handle it.

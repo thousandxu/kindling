@@ -190,6 +190,13 @@ func (cache *SampleCache) loopSendAndRecvTraces() {
 
 func (cache *SampleCache) sendAndRecvSampledTraces() {
 	notifyTraceCount := cache.unSendIds.getToSendCount()
+	if !cpuanalyzer.EnableProfile {
+		// 没有主动开启Profiling，不请求采样TraceIds.
+		if notifyTraceCount > 0 {
+			cache.unSendIds.markSent(notifyTraceCount)
+		}
+		return
+	}
 	// 存在发送失败，缓存Ns数据。当服务端启动后直接发送Ns数据.
 	traceIds := &model.TraceIds{
 		QueryTime: cache.queryTime,
