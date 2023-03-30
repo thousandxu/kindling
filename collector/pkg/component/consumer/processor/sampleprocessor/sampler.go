@@ -70,7 +70,7 @@ func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *c
 
 func (cache *SampleCache) isTailBaseSampled(sampleTrace *SampleTrace) bool {
 	if _, ok := cache.sampledTraceIds.Load(sampleTrace.traceId); ok {
-		cache.telemetry.Logger.Warnf("Trace is stored by tailBase: traceId[%s]", sampleTrace.traceId)
+		cache.telemetry.Logger.Infof("Trace is stored by tailBase: traceId[%s]", sampleTrace.traceId)
 		return ok
 	}
 	return false
@@ -93,8 +93,6 @@ func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
 
 func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 	now := uint64(time.Now().UnixMilli())
-	// 记录该URL命中
-	cache.urlHits.LoadOrStore(sampleTrace.getPidUrl(), now)
 	// 记录TraceId采样
 	if _, exist := cache.sampledTraceIds.LoadOrStore(sampleTrace.traceId, now); !exist {
 		// 待转发TraceId列表
@@ -107,6 +105,9 @@ func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 }
 
 func (cache *SampleCache) storeTrace(sampleTrace *SampleTrace) {
+	// 每次保存一条Trace，更新该URL命中时间
+	cache.urlHits.Store(sampleTrace.getPidUrl(), uint64(time.Now().UnixMilli()))
+
 	// 保存采样的SpanTrace数据
 	cache.telemetry.Logger.Infof("Store Trace: %v", sampleTrace.dataGroup)
 	cache.nextConsumer.Consume(sampleTrace.dataGroup)
@@ -174,6 +175,7 @@ func (cache *SampleCache) checkTailBaseTraces() {
 		cache.traceCache = append(cache.traceCache, newLoopTraces...)
 		cache.traceLock.Unlock()
 	}
+	cache.telemetry.Logger.Infof("Clear Normal Traces[%d] => %d", size, len(newLoopTraces))
 }
 
 func (cache *SampleCache) loopSendAndRecvTraces() {
