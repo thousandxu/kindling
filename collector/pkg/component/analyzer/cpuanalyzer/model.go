@@ -179,6 +179,21 @@ const (
 	CPUTYPE_MAX   CPUType = 7
 )
 
+func (ct CPUType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(uint16(ct))
+}
+
+func (ct *CPUType) UnmarshalJSON(data []byte) error {
+	var val uint16
+	err := json.Unmarshal(data, &val)
+	if err != nil {
+		return err
+	}
+	*ct = CPUType(val)
+
+	return nil
+}
+
 type CpuEvent struct {
 	StartTime   uint64    `json:"startTime"`
 	EndTime     uint64    `json:"endTime"`
