@@ -55,7 +55,7 @@ func (ta *TraceIdAnalyzer) Shutdown() error {
 
 func (ta *TraceIdAnalyzer) ConsumeEvent(event *model.KindlingEvent) error {
 	if !cpuanalyzer.EnableProfile || !ta.cfg.OpenJavaTraceSampling {
-		// 不开启TraceId采样
+		// Skip datas if profiling is not start or sampling is not opened.
 		return nil
 	}
 	isEntry, _ := strconv.ParseUint(event.GetStringUserAttribute("is_enter"), 10, 32)
@@ -105,7 +105,7 @@ func (ta *TraceIdAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 		delete(ta.javaTraces, key)
 
 		if ev.ThreadType != 0 {
-			// 丢弃非业务线程数据.
+			// Skip none business thread.
 			return
 		}
 
@@ -141,10 +141,10 @@ func (ta *TraceIdAnalyzer) analyzerJavaTraceTime(ev *TransactionIdEvent) {
 		}
 		metric := model.NewIntMetric(constvalues.RequestTotalTime, int64(spendTime))
 		dataGroup := model.NewDataGroup(constnames.SpanTraceGroupName, labels, entryEvent.Timestamp, metric)
-		// 发送Metric触发器.
+		// Send Metric Trigger.
 		cpuanalyzer.ReceiveDataGroupAsSignal(dataGroup)
 
-		// 分发给 Aggreagate Processor 和 Sampling Processor.
+		// Send to Aggreagate Processor and Sampling Processor.
 		for _, nexConsumer := range ta.nextConsumers {
 			_ = nexConsumer.Consume(dataGroup)
 		}

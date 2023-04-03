@@ -34,24 +34,21 @@ func NewSampleTrace(dataGroup *model.DataGroup, repeatNum int) *SampleTrace {
 }
 
 type SampleCache struct {
-	// 实时Trace数据
 	traceLock  sync.RWMutex
 	traceCache []*SampleTrace
-	// 本机采样命中TraceId记录，每秒清空
-	unSendIds *UnSendIds
-	// 全链路需采样的TraceId记录<traceId, sampledTime>，每个TraceId缓存traceHoldTime毫秒.
+	unSendIds  *UnSendIds
+	// <traceId, sampledTime>, store every traceId traceHoldTime(ms).
 	sampledTraceIds sync.Map
-	// 命中采样的URL记录<url, lastTime>，每个url缓存urlHitDuration毫秒.
+	// <url, lastTime>, store every url urlHitDuration(ms).
 	urlHits sync.Map
-	// 缓存所需配置
-	traceHoldTime  uint64 // 一个采样TraceId等待N(ms)，该时间段内接收的该TraceId数据都保存.
-	urlHitDuration uint64 // 保存某个URL N(ms)，该时间段内该URL不会被采样命中.
-	// Grpc调用API
+	// config
+	traceHoldTime  uint64
+	urlHitDuration uint64
+	// Grpc API
 	client    model.TraceIdServiceClient
 	queryTime int64
-	// 日志输出
 	telemetry *component.TelemetryTools
-	// 保存Trace数据
+	// Store Trace
 	nextConsumer consumer.Consumer
 }
 
@@ -93,22 +90,21 @@ func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
 
 func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
 	now := uint64(time.Now().UnixMilli())
-	// 记录TraceId采样
 	if _, exist := cache.sampledTraceIds.LoadOrStore(sampleTrace.traceId, now); !exist {
-		// 待转发TraceId列表
+		// Record sampled traceIds and send them to receiver per second.
 		cache.unSendIds.cacheIds(sampleTrace.traceId)
 	}
-	// 保存Profiling数据
+	// Store Profiling Data.
 	cpuanalyzer.ReceiveProfilingSignal(sampleTrace.dataGroup)
 
 	cache.telemetry.Logger.Infof("Store Profiling: TraceId[%s]", sampleTrace.traceId)
 }
 
 func (cache *SampleCache) storeTrace(sampleTrace *SampleTrace) {
-	// 每次保存一条Trace，更新该URL命中时间
+	// Update Url HitTime when trace is stored.
 	cache.urlHits.Store(sampleTrace.getPidUrl(), uint64(time.Now().UnixMilli()))
 
-	// 保存采样的SpanTrace数据
+	// Store sampled spanTrace.
 	cache.telemetry.Logger.Infof("Store Trace: %v", sampleTrace.dataGroup)
 	cache.nextConsumer.Consume(sampleTrace.dataGroup)
 }
@@ -126,7 +122,7 @@ func (cache *SampleCache) loopCheckTailBaseTraces() {
 func (cache *SampleCache) checkTailBaseTraces() {
 	now := uint64(time.Now().UnixMilli())
 
-	// 删除过期TraceId记录.
+	// Delete expired traceIds.
 	cache.sampledTraceIds.Range(func(k, v interface{}) bool {
 		time := v.(uint64)
 		if now > time+cache.traceHoldTime {
@@ -136,7 +132,7 @@ func (cache *SampleCache) checkTailBaseTraces() {
 		return true
 	})
 
-	// 删除过期Url Hit记录.
+	// Delete expired urlHits.
 	cache.urlHits.Range(func(k, v interface{}) bool {
 		time := v.(uint64)
 		if now > time+cache.urlHitDuration {
@@ -153,7 +149,6 @@ func (cache *SampleCache) checkTailBaseTraces() {
 
 	var lastLoopTraces []*SampleTrace
 	cache.traceLock.Lock()
-	// 获取上一轮数据，避免某次循环需要清空几K Trace数据，减少加锁操作.
 	lastLoopTraces = cache.traceCache[0:size]
 	cache.traceCache = cache.traceCache[size:]
 	cache.traceLock.Unlock()
@@ -161,17 +156,18 @@ func (cache *SampleCache) checkTailBaseTraces() {
 	newLoopTraces := []*SampleTrace{}
 	for _, sampleTrace := range lastLoopTraces {
 		if cache.isTailBaseSampled(sampleTrace) {
-			// TailBase 命中，保留该Trace数据
+			// Store tailbase sampled trace
 			cache.storeTrace(sampleTrace)
 		} else if sampleTrace.repeatNum > 0 {
+			// Set sampleTrace times-1.
 			sampleTrace.repeatNum--
 			newLoopTraces = append(newLoopTraces, sampleTrace)
 		}
-		// 丢弃轮询N次SampleTrace数据.
+		// Skip sampleTrace after N times.
 	}
 	if len(newLoopTraces) > 0 {
 		cache.traceLock.Lock()
-		// 将数据回写缓存，重试N次
+		// Put the data back to cache for looping n times.
 		cache.traceCache = append(cache.traceCache, newLoopTraces...)
 		cache.traceLock.Unlock()
 	}
@@ -190,14 +186,14 @@ func (cache *SampleCache) loopSendAndRecvTraces() {
 
 func (cache *SampleCache) sendAndRecvSampledTraces() {
 	notifyTraceCount := cache.unSendIds.getToSendCount()
+	// Don't request traceIds when profiling is not started.
 	if !cpuanalyzer.EnableProfile {
-		// 没有主动开启Profiling，不请求采样TraceIds.
 		if notifyTraceCount > 0 {
 			cache.unSendIds.markSent(notifyTraceCount)
 		}
 		return
 	}
-	// 存在发送失败，缓存Ns数据。当服务端启动后直接发送Ns数据.
+	// Cache N seconds data when the server is not avaiable, send them when the server is avaiable.
 	traceIds := &model.TraceIds{
 		QueryTime: cache.queryTime,
 		TraceIds:  cache.unSendIds.getToSendIds(notifyTraceCount),
@@ -212,12 +208,12 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 		cache.unSendIds.markSent(notifyTraceCount)
 	}
 
-	// 记录最近一次请求的时间
+	// Record Last queryTime for server
 	cache.queryTime = result.GetQueryTime()
 	if result.GetTraceIds() != nil {
 		now := uint64(time.Now().UnixMilli())
 		for _, traceId := range result.GetTraceIds() {
-			// 记录TailBase相关的TraceId列表
+			// Store the tailbased traceIds.
 			cache.sampledTraceIds.LoadOrStore(traceId, now)
 		}
 	}
@@ -225,10 +221,10 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 
 type UnSendIds struct {
 	lock      sync.RWMutex
-	toSendIds []string // 记录未发送记录
-	counts    []int    // 记录每秒数据量.
-	lastNum   int      // 记录上一轮检测时总共有多少数据未发送
-	size      int      // 记录当前有几秒数据未发送，最多存储len(counts)记录
+	toSendIds []string
+	counts    []int // Record count per seconds
+	lastNum   int   // Record how many datas are not sent last time.
+	size      int   // Record how many datas are sent
 }
 
 func NewUnSendIds(size int) *UnSendIds {
@@ -261,7 +257,7 @@ func (unSend *UnSendIds) markUnSent(num int) {
 			unSend.toSendIds = unSend.toSendIds[toRemoveSize:]
 			unSend.lock.Unlock()
 		}
-		// 清除第一个数据，并将数据添加到最后
+		// Clean the oldest record, add new recrod to make cache store N seconds.
 		unSend.counts = append(unSend.counts[1:], num-unSend.lastNum)
 		unSend.lastNum = num - toRemoveSize
 	}
@@ -272,7 +268,7 @@ func (unSend *UnSendIds) markSent(num int) {
 	unSend.toSendIds = unSend.toSendIds[num:]
 	unSend.lock.Unlock()
 
-	// 数组不清空，只重置计数.
+	// Reset count
 	unSend.size = 0
 	unSend.lastNum = 0
 }

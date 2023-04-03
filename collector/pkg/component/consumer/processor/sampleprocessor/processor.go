@@ -52,9 +52,10 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), cfg, telemetry, nextConsumer),
 		traceRetryNum: cfg.SampleTraceRepeatNum,
 	}
-	// 每1s 校验TailBase Trace数据，并清除失效TraceIds.
+	// Check tailBase Traces and clean expired traceIds per second.
 	go p.sampleCache.loopCheckTailBaseTraces()
-	// 每1s 将本机采样的traceIds发送给服务端，并获取Tail TraceIds数据.
+	// Send local sampled traceIds to receiver
+	// Get tailbase sampled traceIds from receiver
 	go p.sampleCache.loopSendAndRecvTraces()
 	return p
 }
@@ -62,14 +63,14 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 func (p *SampleProcessor) Consume(dataGroup *model.DataGroup) error {
 	sampleTrace := NewSampleTrace(dataGroup, p.traceRetryNum)
 	if p.sampleCache.isSampled(sampleTrace) {
-		// 保存Trace 和 Profiling
+		// Store Trace and Profiling
 		p.sampleCache.storeProfiling(sampleTrace)
 		p.sampleCache.storeTrace(sampleTrace)
 	} else if p.sampleCache.isTailBaseSampled(sampleTrace) {
-		// 只保留Trace数据
+		// Store Trace
 		p.sampleCache.storeTrace(sampleTrace)
 	} else {
-		// 非错 或 慢 或 URL5s内已采中, 将数据存储到SampleCache中
+		// Store datas into SampleCache for none-error, none slow or hit datas in N seconds.
 		p.sampleCache.cacheSampleTrace(sampleTrace)
 	}
 	return nil
