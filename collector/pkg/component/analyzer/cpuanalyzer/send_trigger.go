@@ -40,10 +40,11 @@ func ReceiveProfilingSignal(data *model.DataGroup) {
 	}
 	if duration, ok := data.GetMetric(constvalues.RequestTotalTime); ok {
 		event := SendTriggerEvent{
-			Pid:          uint32(data.Labels.GetIntValue("pid")),
-			StartTime:    data.Timestamp,
-			SpendTime:    uint64(duration.GetInt().Value),
-			OriginalData: data,
+			Pid:              uint32(data.Labels.GetIntValue("pid")),
+			StartTime:        data.Timestamp,
+			SpendTime:        uint64(duration.GetInt().Value),
+			OriginalData:     data,
+			TraceIdProfiling: true,
 		}
 		profilingTriggerChan <- event
 	}
@@ -93,10 +94,11 @@ func ReceiveDataGroupAsSignal(data *model.DataGroup) {
 }
 
 type SendTriggerEvent struct {
-	Pid          uint32           `json:"pid"`
-	StartTime    uint64           `json:"startTime"`
-	SpendTime    uint64           `json:"spendTime"`
-	OriginalData *model.DataGroup `json:"originalData"`
+	Pid              uint32           `json:"pid"`
+	StartTime        uint64           `json:"startTime"`
+	SpendTime        uint64           `json:"spendTime"`
+	OriginalData     *model.DataGroup `json:"originalData"`
+	TraceIdProfiling bool
 }
 
 // ReadTraceChan reads the trace channel and make cpuanalyzer consume them as general events.
@@ -138,13 +140,20 @@ func (ca *CpuAnalyzer) ReadMetricsTriggerChan() {
 func (ca *CpuAnalyzer) ReadProfilingTriggerChan() {
 	// Break the for loop if the channel is closed
 	for sendContent := range profilingTriggerChan {
-		// Only send the slow traces as the signals
-		if !sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
+		profiling := false
+		if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
+			profiling = true
+		} else if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsError) && ca.cfg.ProfilingError {
+			profiling = true
+		}
+		if !profiling {
 			continue
 		}
-		// Store the traces first
-		for _, nexConsumer := range ca.nextConsumers {
-			_ = nexConsumer.Consume(sendContent.OriginalData)
+		if !sendContent.TraceIdProfiling {
+			// Store the Network Traces
+			for _, nexConsumer := range ca.nextConsumers {
+				_ = nexConsumer.Consume(sendContent.OriginalData)
+			}
 		}
 		// Copy the value and then get its pointer to create a new task
 		triggerEvent := sendContent
@@ -197,10 +206,11 @@ func (ca *CpuAnalyzer) sampleSend() {
 					return false
 				}
 				event := SendTriggerEvent{
-					Pid:          uint32(data.Labels.GetIntValue("pid")),
-					StartTime:    data.Timestamp,
-					SpendTime:    uint64(duration.GetInt().Value),
-					OriginalData: data,
+					Pid:              uint32(data.Labels.GetIntValue("pid")),
+					StartTime:        data.Timestamp,
+					SpendTime:        uint64(duration.GetInt().Value),
+					OriginalData:     data,
+					TraceIdProfiling: false,
 				}
 				profilingTriggerChan <- event
 				sampleMap.Delete(k)

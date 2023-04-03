@@ -1,6 +1,8 @@
 package cpuanalyzer
 
 type Config struct {
+	// Enable profile error data
+	ProfilingError bool `mapstructure:"profiling_error"`
 	// SamplingInterval is the sampling interval for the same url.
 	// The unit is seconds.
 	SamplingInterval int `mapstructure:"sampling_interval"`
@@ -14,6 +16,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
+		ProfilingError:       false,
 		SamplingInterval:     5,
 		SegmentSize:          40,
 		EdgeEventsWindowSize: 2,
