@@ -103,10 +103,6 @@ struct kindling_event_t_for_go {
 void parse_jf(char* data_val, sinsp_evt_param data_param, kindling_event_t_for_go* p_kindling_event,
               sinsp_threadinfo* threadInfo, uint16_t& userAttNumber);
 
-void parse_txid(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
-                kindling_event_t_for_go* p_kindling_event, sinsp_threadinfo* threadInfo,
-                uint16_t& userAttNumber);
-
 void parse_txin(sinsp_evt* s_evt, char* data_val, sinsp_evt_param data_param,
                 kindling_event_t_for_go* p_kindling_event, sinsp_threadinfo* threadInfo,
                 uint16_t& userAttNumber);

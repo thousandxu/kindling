@@ -5,6 +5,9 @@ const (
 	RequestPayload  = "request_payload"
 	ResponsePayload = "response_payload"
 
+	ApmParentSpanId = "apm_parent_id"
+	ApmSpanIds      = "apm_span_ids"
+
 	HttpMethod       = "http_method"
 	HttpUrl          = "http_url"
 	HttpApmTraceType = "trace_type"
