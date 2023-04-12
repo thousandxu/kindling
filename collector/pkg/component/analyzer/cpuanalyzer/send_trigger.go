@@ -257,7 +257,7 @@ func (ca *CpuAnalyzer) sendEvents(keyElements *model.AttributeMap, pid uint32, s
 				continue
 			}
 			segment := val.(*Segment)
-			if len(segment.CpuEvents) != 0 {
+			if !segment.isEmpty() {
 				// Don't remove the duplicated one
 				segment.IndexTimestamp = time.Now().String()
 				dataGroup := segment.toDataGroup(timeSegments)
