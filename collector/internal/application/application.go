@@ -78,7 +78,7 @@ func (a *Application) Shutdown() error {
 }
 
 func (a *Application) registerFactory() {
-	a.componentsFactory.RegisterReceiver(cgoreceiver.Cgo, cgoreceiver.NewCgoReceiver, &cgoreceiver.Config{})
+	a.componentsFactory.RegisterReceiver(cgoreceiver.Cgo, cgoreceiver.NewCgoReceiver, cgoreceiver.NewDefaultConfig())
 	a.componentsFactory.RegisterAnalyzer(network.Network.String(), network.NewNetworkAnalyzer, network.NewDefaultConfig())
 	a.componentsFactory.RegisterAnalyzer(cpuanalyzer.CpuProfile.String(), cpuanalyzer.NewCpuAnalyzer, cpuanalyzer.NewDefaultConfig())
 	a.componentsFactory.RegisterAnalyzer(traceidanalyzer.TraceId.String(), traceidanalyzer.NewTraceIdAnalyzer, traceidanalyzer.NewDefaultConfig())
