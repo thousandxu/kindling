@@ -133,7 +133,7 @@ func (ta *TraceIdAnalyzer) analyzerTraceEvent(isEnter bool, ev *ThreadTraceIdEve
 			constlabels.ApmSpanIds:      model.NewStringValue(entryEvent.getSpanIds()),
 			constlabels.HttpApmTraceId:  model.NewStringValue(entryEvent.traceId),
 			constlabels.ContainerId:     model.NewStringValue(traceEvent.ContainerId),
-			constlabels.EndTime:         model.NewIntValue(int64(traceEvent.Timestamp + traceEvent.Duration)),
+			constlabels.EndTime:         model.NewIntValue(int64(ev.Timestamp)),
 		})
 		if protocol == "http" {
 			labels.AddStringValue(constlabels.HttpUrl, contentKey)

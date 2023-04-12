@@ -101,6 +101,10 @@ func (ca *CpuAnalyzer) ConsumeTransactionIdEvent(event *model.KindlingEvent) {
 		TraceId:   event.GetStringUserAttribute("trace_id"),
 		IsEntry:   uint32(isEntry),
 	}
+	if ce := ca.telemetry.Logger.Check(zapcore.DebugLevel, ""); ce != nil {
+		ca.telemetry.Logger.Debug(fmt.Sprintf("Receive TraceIdEvent: pid=%d, tid=%d, comm=%s, %+v", event.GetPid(),
+			event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev))
+	}
 	//ca.sendEventDirectly(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
 	ca.PutEventToSegments(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
 }
@@ -134,6 +138,10 @@ func (ca *CpuAnalyzer) ConsumeSpanEvent(event *model.KindlingEvent) {
 		case userAttributes.GetKey() == "span":
 			ev.Name = string(userAttributes.GetValue())
 		}
+	}
+	if ce := ca.telemetry.Logger.Check(zapcore.DebugLevel, ""); ce != nil {
+		ca.telemetry.Logger.Debug(fmt.Sprintf("Receive SpanEvent: pid=%d, tid=%d, comm=%s, %+v", event.GetPid(),
+			event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev))
 	}
 	ca.PutEventToSegments(event.GetPid(), event.Ctx.ThreadInfo.GetTid(), event.Ctx.ThreadInfo.Comm, ev)
 }
