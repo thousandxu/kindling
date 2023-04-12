@@ -14,6 +14,7 @@ import (
 
 var (
 	EnableProfile         bool
+	ProfilingError        bool
 	profilingOnce         sync.Once
 	metricsOnce           sync.Once
 	metricsTriggerChan    chan *model.DataGroup
@@ -143,7 +144,7 @@ func (ca *CpuAnalyzer) ReadProfilingTriggerChan() {
 		profiling := false
 		if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
 			profiling = true
-		} else if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsError) && ca.cfg.ProfilingError {
+		} else if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsError) && ProfilingError {
 			profiling = true
 		}
 		if !profiling {

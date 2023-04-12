@@ -121,9 +121,12 @@ func (p *AggregateProcessor) Consume(dataGroup *model.DataGroup) error {
 		// The abnormal recordersMap will be treated as trace in later processing.
 		// Must trace be merged into metrics in this place? Yes, because we have to generate histogram metrics,
 		// trace recordersMap should not be recorded again, otherwise the percentiles will be much higher.
-		if p.isSampled(dataGroup) {
+		profiled, sampled := p.isSampled(dataGroup)
+		if sampled {
 			dataGroup.Name = constnames.SingleNetRequestMetricGroup
 			cpuanalyzer.ReceiveDataGroupAsSignal(dataGroup)
+
+			dataGroup.Labels.AddBoolValue(constlabels.IsProfiled, profiled)
 			abnormalDataErr = p.nextConsumer.Consume(dataGroup)
 		}
 		dataGroup.Name = constnames.AggregatedNetRequestMetricGroup
@@ -283,21 +286,21 @@ func newTcpConnectLabelSelectors() *aggregator.LabelSelectors {
 	)
 }
 
-func (p *AggregateProcessor) isSampled(dataGroup *model.DataGroup) bool {
+func (p *AggregateProcessor) isSampled(dataGroup *model.DataGroup) (profiled bool, sampled bool) {
 	randSeed := rand.Intn(100)
 	if isAbnormal(dataGroup) {
 		if (randSeed < p.cfg.SamplingRate.SlowData) && dataGroup.Labels.GetBoolValue(constlabels.IsSlow) {
-			return true
+			return true, true
 		}
 		if (randSeed < p.cfg.SamplingRate.ErrorData) && dataGroup.Labels.GetBoolValue(constlabels.IsError) {
-			return true
+			return cpuanalyzer.ProfilingError, true
 		}
 	} else {
 		if randSeed < p.cfg.SamplingRate.NormalData {
-			return true
+			return dataGroup.Labels.GetBoolValue(constlabels.IsSlow), true
 		}
 	}
-	return false
+	return false, false
 }
 
 // shouldAggregate returns true if the dataGroup is slow or has errors.

@@ -8,6 +8,8 @@ const (
 	ApmParentSpanId = "apm_parent_id"
 	ApmSpanIds      = "apm_span_ids"
 
+	IsProfiled = "is_profiled"
+
 	HttpMethod       = "http_method"
 	HttpUrl          = "http_url"
 	HttpApmTraceType = "trace_type"

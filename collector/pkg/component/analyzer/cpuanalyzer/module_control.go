@@ -17,6 +17,7 @@ func (ca *CpuAnalyzer) StartProfile() error {
 	profilingTriggerChan = make(chan SendTriggerEvent, 3e5)
 	abnormalInnerCallChan = make(chan *model.DataGroup, 1e4)
 	EnableProfile = true
+	ProfilingError = ca.cfg.ProfilingError
 	profilingOnce = sync.Once{}
 	metricsOnce = sync.Once{}
 	go ca.ReadProfilingTriggerChan()
@@ -30,6 +31,7 @@ func (ca *CpuAnalyzer) StopProfile() error {
 	ca.lock.Lock()
 	defer ca.lock.Unlock()
 	EnableProfile = false
+	ProfilingError = false
 	// Clear the old events even if they are not sent
 	ca.cpuPidEvents = make(map[uint32]map[uint32]*TimeSegments, 100000)
 	return nil

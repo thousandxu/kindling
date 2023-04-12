@@ -9,6 +9,7 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
+	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
@@ -65,6 +66,7 @@ func (p *SampleProcessor) Consume(dataGroup *model.DataGroup) error {
 	if p.sampleCache.isSampled(sampleTrace) {
 		// Store Trace and Profiling
 		p.sampleCache.storeProfiling(sampleTrace)
+		sampleTrace.dataGroup.Labels.AddBoolValue(constlabels.IsProfiled, true)
 		p.sampleCache.storeTrace(sampleTrace)
 	} else if p.sampleCache.isTailBaseSampled(sampleTrace) {
 		// Store Trace

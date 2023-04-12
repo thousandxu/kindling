@@ -78,7 +78,7 @@ func (cache *SampleCache) isSampled(sampleTrace *SampleTrace) bool {
 		cache.telemetry.Logger.Warnf("Ignore: Trace By Url[%s]", sampleTrace.getPidUrl())
 		return false
 	}
-	return sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsError) ||
+	return (cpuanalyzer.ProfilingError && sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsError)) ||
 		sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsSlow)
 }
 
