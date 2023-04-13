@@ -598,7 +598,7 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
                         stackList: []
                     };
                     
-                    if (type === '0') {
+                    if (parseInt(type) === 0) {
                         // TODO 日志其实需求根据@前面的数字截取字符串长度
                         if (logList.length > 0 && logList[onFlag]) {
                             let logInfo = logList[onFlag].split('@');
@@ -659,7 +659,7 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
                         }
                         onFlag++;
                     }
-                    if (type !== '0') {
+                    if (parseInt(type) !== 0) {
                         if (offInfoList.length > 0 && offInfoList[offFlag]) {
                             let result: any = onOffInfoHandle(offInfoList[offFlag], eventObj, timeRange);
                             if (runqList[offFlag]) {
@@ -711,7 +711,7 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
                     //     threadObj.eventList.push(eventObj);
                     // }
                 } else {
-                    if (type === '0') {
+                    if (parseInt(type) === 0) {
                         onFlag++;
                     } else {
                         offFlag++;
