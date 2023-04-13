@@ -570,8 +570,8 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
         // console.log('cpuEvents', cpuEvents);
         _.forEach(cpuEvents, event => {
             let { startTime } = event;
-            let timeTypeList = _.compact(event.timeType);
-            let timeValueList = _.compact(event.typeSpecs);
+            let timeTypeList = event.timeType;
+            let timeValueList = event.typeSpecs;
             // 可能出现对应事件0 没有log输出的情况，日志格式为log1||log3，所以不能用compact清除空值。 onInfo和offInfo同上
             let logList = event.log.split('|');
             let stackList = event.stack ? event.stack.split('|') : [];
