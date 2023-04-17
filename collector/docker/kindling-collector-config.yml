@@ -202,9 +202,17 @@ exporters:
     es_config:
       es_host: http://10.10.10.10:9200
       index_suffix: dev
-  prometheusexporter:
+  prometheus:
     prometheus:
       endpoint: 0.0.0.0:9499
+    adapter_config:
+      need_trace_as_metric: true
+      need_pod_detail: true
+      store_external_src_ip: true
+      # When using otlp-grpc / stdout exporter , this option supports to
+      # send trace data in the format of ResourceSpan
+      need_trace_as_span: false
+
   otelexporter:
     adapter_config:
       need_trace_as_metric: true
