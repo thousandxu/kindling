@@ -145,8 +145,6 @@ processors:
     sample_url_hit_duration: 5
     # Ignore trace whose duration is less than the threshold(s).
     sample_trace_ignore_threshold: 100
-    # Set the promethues address.
-    promethues_address: "http://127.0.0.1:9090"
     # Set the query interval(s) for update p9x.
     promethues_query_interval: 30
     # Set the rate for p9x value.
