@@ -16,6 +16,7 @@ import (
 type SampleTrace struct {
 	dataGroup *model.DataGroup
 	traceId   string
+	duration  uint64
 	repeatNum int
 }
 
@@ -25,10 +26,11 @@ func (sampleTrace *SampleTrace) getPidUrl() string {
 		sampleTrace.dataGroup.Labels.GetStringValue(constlabels.ContentKey))
 }
 
-func NewSampleTrace(dataGroup *model.DataGroup, repeatNum int) *SampleTrace {
+func NewSampleTrace(dataGroup *model.DataGroup, duration uint64, repeatNum int) *SampleTrace {
 	return &SampleTrace{
 		dataGroup: dataGroup,
 		traceId:   dataGroup.Labels.GetStringValue(constlabels.HttpApmTraceId),
+		duration:  duration,
 		repeatNum: repeatNum,
 	}
 }
@@ -42,26 +44,31 @@ type SampleCache struct {
 	// <url, lastTime>, store every url urlHitDuration(ms).
 	urlHits sync.Map
 	// config
-	traceHoldTime  uint64
-	urlHitDuration uint64
+	traceHoldTime   uint64
+	urlHitDuration  uint64
+	p9xIncreaseRate float64
 	// Grpc API
 	client    model.TraceIdServiceClient
 	queryTime int64
 	telemetry *component.TelemetryTools
+	// P90 API
+	p9xCache *prometheusP9xCache
 	// Store Trace
 	nextConsumer consumer.Consumer
 }
 
 func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
 	return &SampleCache{
-		traceCache:     make([]*SampleTrace, 0),
-		unSendIds:      NewUnSendIds(cfg.SampleTraceRepeatNum),
-		traceHoldTime:  uint64(cfg.SampleTraceWaitTime) * 1000,
-		urlHitDuration: uint64(cfg.SampleUrlHitDuration) * 1000,
-		client:         client,
-		queryTime:      0,
-		telemetry:      telemetry,
-		nextConsumer:   nextConsumer,
+		traceCache:      make([]*SampleTrace, 0),
+		unSendIds:       NewUnSendIds(cfg.SampleTraceRepeatNum),
+		traceHoldTime:   uint64(cfg.SampleTraceWaitTime) * 1000,
+		urlHitDuration:  uint64(cfg.SampleUrlHitDuration) * 1000,
+		client:          client,
+		queryTime:       0,
+		p9xCache:        newPrometheusP9xCache(cfg.PrometheusAddress, cfg.P9xValue, cfg.P9xDuration, cfg.PortForPrometheus, telemetry),
+		p9xIncreaseRate: cfg.P9xIncreaseRate,
+		telemetry:       telemetry,
+		nextConsumer:    nextConsumer,
 	}
 }
 
@@ -75,11 +82,22 @@ func (cache *SampleCache) isTailBaseSampled(sampleTrace *SampleTrace) bool {
 
 func (cache *SampleCache) isSampled(sampleTrace *SampleTrace) bool {
 	if _, ok := cache.urlHits.Load(sampleTrace.getPidUrl()); ok {
-		cache.telemetry.Logger.Warnf("Ignore: Trace By Url[%s]", sampleTrace.getPidUrl())
 		return false
 	}
-	return (cpuanalyzer.ProfilingError && sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsError)) ||
-		sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsSlow)
+	return cache.isSlow(sampleTrace)
+}
+
+func (cache *SampleCache) isSlow(sampleTrace *SampleTrace) bool {
+	p9x := cache.p9xCache.getP9x(sampleTrace)
+	sampleTrace.dataGroup.Labels.AddIntValue(constlabels.P90, int64(p9x))
+	if p9x == 0.0 {
+		// Not Got P9x.
+		return sampleTrace.dataGroup.Labels.GetBoolValue(constlabels.IsSlow)
+	}
+	if sampleTrace.duration >= uint64(p9x*cache.p9xIncreaseRate) {
+		return true
+	}
+	return false
 }
 
 func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
@@ -89,6 +107,8 @@ func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
 }
 
 func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
+	sampleTrace.dataGroup.Labels.AddBoolValue(constlabels.IsProfiled, true)
+
 	now := uint64(time.Now().UnixMilli())
 	if _, exist := cache.sampledTraceIds.LoadOrStore(sampleTrace.traceId, now); !exist {
 		// Record sampled traceIds and send them to receiver per second.
@@ -156,6 +176,10 @@ func (cache *SampleCache) checkTailBaseTraces() {
 	newLoopTraces := []*SampleTrace{}
 	for _, sampleTrace := range lastLoopTraces {
 		if cache.isTailBaseSampled(sampleTrace) {
+			if cache.isSlow(sampleTrace) {
+				// Store Profiling
+				cache.storeProfiling(sampleTrace)
+			}
 			// Store tailbase sampled trace
 			cache.storeTrace(sampleTrace)
 		} else if sampleTrace.repeatNum > 0 {
@@ -215,6 +239,16 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 		for _, traceId := range result.GetTraceIds() {
 			// Store the tailbased traceIds.
 			cache.sampledTraceIds.LoadOrStore(traceId, now)
+		}
+	}
+}
+
+func (cache *SampleCache) updateP9xByPromethus(interval int) {
+	timer := time.NewTicker(time.Duration(interval) * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			cache.p9xCache.updateP9x()
 		}
 	}
 }

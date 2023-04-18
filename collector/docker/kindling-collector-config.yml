@@ -143,6 +143,20 @@ processors:
     sample_trace_wait_time: 30
     # Set duration for save 1 trace after hit same url.
     sample_url_hit_duration: 5
+    # Ignore trace whose duration is less than the threshold(s).
+    sample_trace_ignore_threshold: 100
+    # Set the promethues address.
+    promethues_address: "http://127.0.0.1:9090"
+    # Set the query interval(s) for update p9x.
+    promethues_query_interval: 30
+    # Set the rate for p9x value.
+    query_p9x_increase_rate: 1.5
+    # Set the p9x query value
+    query_p9x_val: 0.9
+    # Set the p9x query time range.
+    query_p9x_duration: "1d"
+    # Set the port of kindling for promethues collect.
+    query_port_promethues: 9499
     # Set Receiver Ip
     receiver_ip: 127.0.0.1
     # Set Receiver Ip

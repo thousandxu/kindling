@@ -142,18 +142,22 @@ func (ca *CpuAnalyzer) ReadProfilingTriggerChan() {
 	// Break the for loop if the channel is closed
 	for sendContent := range profilingTriggerChan {
 		profiling := false
-		if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
-			profiling = true
-		} else if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsError) && ProfilingError {
-			profiling = true
-		}
-		if !profiling {
-			continue
-		}
-		if !sendContent.TraceIdProfiling {
-			// Store the Network Traces
-			for _, nexConsumer := range ca.nextConsumers {
-				_ = nexConsumer.Consume(sendContent.OriginalData)
+		if !sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsProfiled) {
+			if sendContent.TraceIdProfiling {
+				continue
+			} else {
+				if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsSlow) {
+					profiling = true
+				} else if sendContent.OriginalData.Labels.GetBoolValue(constlabels.IsError) && ProfilingError {
+					profiling = true
+				}
+				if !profiling {
+					continue
+				}
+				// Store the Network Traces
+				for _, nexConsumer := range ca.nextConsumers {
+					_ = nexConsumer.Consume(sendContent.OriginalData)
+				}
 			}
 		}
 		// Copy the value and then get its pointer to create a new task

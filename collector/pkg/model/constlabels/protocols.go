@@ -9,6 +9,7 @@ const (
 	ApmSpanIds      = "apm_span_ids"
 
 	IsProfiled = "is_profiled"
+	P90        = "p90"
 
 	HttpMethod       = "http_method"
 	HttpUrl          = "http_url"

@@ -9,7 +9,7 @@ import (
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer/processor"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
-	"github.com/Kindling-project/kindling/collector/pkg/model/constlabels"
+	"github.com/Kindling-project/kindling/collector/pkg/model/constvalues"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
@@ -58,17 +58,37 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 	// Send local sampled traceIds to receiver
 	// Get tailbase sampled traceIds from receiver
 	go p.sampleCache.loopSendAndRecvTraces()
+	// Get P9x Data
+	go p.sampleCache.updateP9xByPromethus(cfg.PrometheusQueryInterval)
 	return p
 }
 
+func getDuration(dataGroup *model.DataGroup) uint64 {
+	for i := 0; i < len(dataGroup.Metrics); i++ {
+		if dataGroup.Metrics[i].Name == constvalues.RequestTotalTime {
+			return uint64(dataGroup.Metrics[i].GetInt().Value)
+		}
+	}
+	return 0
+}
+
 func (p *SampleProcessor) Consume(dataGroup *model.DataGroup) error {
-	sampleTrace := NewSampleTrace(dataGroup, p.traceRetryNum)
+	duration := getDuration(dataGroup)
+	if duration < uint64(p.cfg.SampleTraceIgnoreThreshold)*1000000 {
+		// Ignore Low Valued Datas
+		return nil
+	}
+
+	sampleTrace := NewSampleTrace(dataGroup, duration, p.traceRetryNum)
 	if p.sampleCache.isSampled(sampleTrace) {
 		// Store Trace and Profiling
 		p.sampleCache.storeProfiling(sampleTrace)
-		sampleTrace.dataGroup.Labels.AddBoolValue(constlabels.IsProfiled, true)
 		p.sampleCache.storeTrace(sampleTrace)
 	} else if p.sampleCache.isTailBaseSampled(sampleTrace) {
+		if p.sampleCache.isSlow(sampleTrace) {
+			// Store Profiling
+			p.sampleCache.storeProfiling(sampleTrace)
+		}
 		// Store Trace
 		p.sampleCache.storeTrace(sampleTrace)
 	} else {
