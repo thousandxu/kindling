@@ -58,6 +58,8 @@ analyzers:
     open_java_trace_sampling: true
     # Set Slow Time Threshold(ms).
     java_trace_slow_time: 500
+    # Set the max wait time(s) for traceId.
+    java_trace_wait_second: 30
   tcpconnectanalyzer:
     channel_size: 10000
     wait_event_second: 10

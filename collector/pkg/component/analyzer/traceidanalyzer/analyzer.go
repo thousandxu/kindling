@@ -166,8 +166,8 @@ func (ta *TraceIdAnalyzer) cleanExpiredTraces() {
 		case <-timer.C:
 			ta.javaTraces.Range(func(k, v interface{}) bool {
 				entryEvent := v.(*TraceIdEvents)
-				if entryEvent.getAndIncrCheckTimes() > 5 {
-					// Clean Every 1 Mintue.
+				if entryEvent.getAndIncrCheckTimes() > ta.cfg.JavaTraceWaitSecond {
+					// Clean Every 1 Second.
 					ta.telemetry.Logger.Infof("==>Clean Expired JavaTrace: %v\n", entryEvent)
 					ta.javaTraces.Delete(k)
 				}
