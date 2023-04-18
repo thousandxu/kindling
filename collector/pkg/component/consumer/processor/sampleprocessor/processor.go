@@ -49,8 +49,14 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 	}
 
 	p := &SampleProcessor{
-		cfg:           cfg,
-		sampleCache:   NewSampleCache(model.NewTraceIdServiceClient(conn), cfg, telemetry, nextConsumer),
+		cfg: cfg,
+		sampleCache: NewSampleCache(
+			model.NewTraceIdServiceClient(conn),
+			model.NewP9XServiceClient(conn),
+			cfg,
+			telemetry,
+			nextConsumer,
+		),
 		traceRetryNum: cfg.SampleTraceRepeatNum,
 	}
 	// Check tailBase Traces and clean expired traceIds per second.
@@ -59,7 +65,7 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 	// Get tailbase sampled traceIds from receiver
 	go p.sampleCache.loopSendAndRecvTraces()
 	// Get P9x Data
-	go p.sampleCache.updateP9xByPromethus(cfg.PrometheusQueryInterval)
+	go p.sampleCache.updateP9x(cfg.PrometheusQueryInterval)
 	return p
 }
 

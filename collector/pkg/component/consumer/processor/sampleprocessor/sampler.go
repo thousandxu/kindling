@@ -57,7 +57,7 @@ type SampleCache struct {
 	nextConsumer consumer.Consumer
 }
 
-func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
+func NewSampleCache(client model.TraceIdServiceClient, p9xClient model.P9XServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
 	return &SampleCache{
 		traceCache:      make([]*SampleTrace, 0),
 		unSendIds:       NewUnSendIds(cfg.SampleTraceRepeatNum),
@@ -65,7 +65,7 @@ func NewSampleCache(client model.TraceIdServiceClient, cfg *Config, telemetry *c
 		urlHitDuration:  uint64(cfg.SampleUrlHitDuration) * 1000,
 		client:          client,
 		queryTime:       0,
-		p9xCache:        newPrometheusP9xCache(cfg.PrometheusAddress, cfg.P9xValue, cfg.P9xDuration, cfg.PortForPrometheus, telemetry),
+		p9xCache:        newPrometheusP9xCache(p9xClient, telemetry),
 		p9xIncreaseRate: cfg.P9xIncreaseRate,
 		telemetry:       telemetry,
 		nextConsumer:    nextConsumer,
@@ -243,12 +243,12 @@ func (cache *SampleCache) sendAndRecvSampledTraces() {
 	}
 }
 
-func (cache *SampleCache) updateP9xByPromethus(interval int) {
+func (cache *SampleCache) updateP9x(interval int) {
 	timer := time.NewTicker(time.Duration(interval) * time.Second)
 	for {
 		select {
 		case <-timer.C:
-			cache.p9xCache.updateP9x()
+			cache.p9xCache.updateP9xByGrpc()
 		}
 	}
 }

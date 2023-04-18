@@ -12,19 +12,11 @@ type Config struct {
 	// Set Mini time for sampled trace. The trace will ignore when the duration is less than the threshold.
 	// The unit is millisecond.
 	SampleTraceIgnoreThreshold int `mapstructure:"sample_trace_ignore_threshold"`
-	// Promethues Address
-	PrometheusAddress string `mapstructure:"promethues_address"`
 	// Set Promethues Query Interval
 	// The unit is seconds.
 	PrometheusQueryInterval int `mapstructure:"promethues_query_interval"`
 	// Set the increase rate for p9x
 	P9xIncreaseRate float64 `mapstructure:"query_p9x_increase_rate"`
-	// Set query for the p9x
-	P9xValue float32 `mapstructure:"query_p9x_val"`
-	// Set query for the p9x duration
-	P9xDuration string `mapstructure:"query_p9x_duration"`
-	// Set the port of kindling for promethues collect.
-	PortForPrometheus int `mapstructure:"query_port_promethues"`
 	// The Receiver Ip
 	ReceiverIp string `mapstructure:"receiver_ip"`
 	// The Receiver Port
@@ -37,12 +29,8 @@ func NewDefaultConfig() *Config {
 		SampleTraceIgnoreThreshold: 100,
 		SampleTraceWaitTime:        30,
 		SampleUrlHitDuration:       5,
-		PrometheusAddress:          "http://127.0.0.1:9090",
 		PrometheusQueryInterval:    30,
 		P9xIncreaseRate:            1.0,
-		P9xValue:                   0.9,
-		P9xDuration:                "1d",
-		PortForPrometheus:          9499,
 		ReceiverIp:                 "127.0.0.1",
 		ReceiverPort:               29090,
 	}
