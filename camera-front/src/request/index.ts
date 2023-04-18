@@ -54,3 +54,9 @@ export const getFileDetail = (params: any) => {
 export const toggleProfile = (params: any) => {
     return axios.post(basicUrl + '/profile', params);
 }
+
+
+export const getTraceTopology = (params) => {
+    // return axios.get(basicUrl + '/esserver/getTestTraceData', {params});
+    return axios.get(basicUrl + '/esserver/getTraceData', {params});
+}

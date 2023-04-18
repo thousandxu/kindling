@@ -570,6 +570,8 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
         // console.log('cpuEvents', cpuEvents);
         _.forEach(cpuEvents, event => {
             let { startTime } = event;
+            // let timeTypeList = _.compact(event.timeType.split(','));
+            // let timeValueList = _.compact(event.typeSpecs.split(',')).map((v: any) => parseFloat(v));
             let timeTypeList = event.timeType;
             let timeValueList = event.typeSpecs;
             // 可能出现对应事件0 没有log输出的情况，日志格式为log1||log3，所以不能用compact清除空值。 onInfo和offInfo同上
@@ -577,6 +579,7 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
             let stackList = event.stack ? event.stack.split('|') : [];
             let onInfoList = event.onInfo.split('|');
             let offInfoList = event.offInfo.split('|');
+            // let runqList = event.runqLatency.split(',');
             let runqList = event.runqLatency;
             let onFlag = 0;
             let offFlag = 0;
@@ -679,9 +682,9 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
                             if (runqList[offFlag] > 1000) {
                                 let temp = _.isArray(result) ? result[0] : result;
                                 let obj: any = {
-                                    startTime: temp.endTime - runqList[offFlag] / 1000,
+                                    startTime: temp.endTime - parseInt(runqList[offFlag]) / 1000,
                                     endTime: temp.endTime,
-                                    time: runqList[offFlag],
+                                    time: parseInt(runqList[offFlag]),
                                     eventType: 'runqLatency',
                                     type: 'runqLatency'
                                 };
@@ -697,7 +700,7 @@ export const dataHandle = (data: any, timeRange, trace: any) => {
                                 let obj: any = {
                                     startTime: eventObj.endTime - parseInt(runqList[offFlag]) / 1000,
                                     endTime: eventObj.endTime,
-                                    time: parseInt(runqList[offFlag]) / 1000,
+                                    time: parseInt(runqList[offFlag]),
                                     eventType: 'runqLatency',
                                     type: 'runqLatency'
                                 };

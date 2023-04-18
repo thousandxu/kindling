@@ -73,6 +73,7 @@ app.get("/test", function(req, res, next) {
 });
 
 app.use('/file', require('./routers/file.js'));
+app.use('/esserver', require('./routers/esServer.js'));
 
 var httpServer = http.createServer(app);
 // var httpsServer = https.createServer(credentials, app);
