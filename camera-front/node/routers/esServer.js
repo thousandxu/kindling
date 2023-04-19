@@ -14,6 +14,7 @@ function handleData(data) {
     let nodes = [], edges = [];
     _.forEach(data, item => {
         let metric = _.find(item.metrics, { Name: 'request_total_time' });
+        let timestamp = parseInt(item.timestamp / 1000000);
         if (_.findIndex(nodes, {apm_span_ids: item.labels.apm_span_ids}) === -1) {
             let node = {
                 content_key: item.labels.content_key,
@@ -27,20 +28,20 @@ function handleData(data) {
                 protocol: item.labels.protocol,
                 list: [
                     {
-                        endTime: parseInt(item.timestamp / 1000000),
+                        endTime: timestamp,
                         totalTime: metric ? metric.Data.Value : 0,
-                        p90: item.labels.p90 | 0
+                        p90: item.labels.p90
                     }
                 ]
             }
             nodes.push(node);
         } else {
             let node = _.find(nodes, {apm_span_ids: item.labels.apm_span_ids});
-            if (_.findIndex(node.list, {endTime: item.labels.endTime}) === -1) {
+            if (_.findIndex(node.list, {endTime: timestamp}) === -1) {
                 node.list.push({
-                    endTime: parseInt(item.timestamp / 1000000),
+                    endTime: timestamp,
                     totalTime: metric ? metric.Data.Value : 0,
-                    p90: item.labels.p90 | 0,
+                    p90: item.labels.p90,
                 });
             }
         }
@@ -67,8 +68,17 @@ router.get('/getTraceData', async(req, res, next) => {
     const { traceId } = req.query;
     console.log(traceId);
     // try {
-    //     let result = await esService.getEsData('camera_event_group_proc', 'labels.tid', 24512, 10);
+    //     let result = await esService.getEsData('span_trace_group_dev', 'labels.trace_id', traceId, 1, 100);
     //     console.log('result', result);
+    //     let hits = result.body.hits.hits;
+    //     console.log(JSON.stringify(result.body.hits));
+    //     let data = _.map(hits, '_source');
+    //     let finalResult = handleData(data);
+
+    //     res.status(200).json({
+    //         success: true,
+    //         data: finalResult
+    //     });
     // } catch (error) {
     //     console.log('我报错了 哈哈哈哈哈哈');
     //     console.log('error', error)
@@ -80,7 +90,7 @@ router.get('/getTraceData', async(req, res, next) => {
         // type: '_doc',
         body: {
             query: {
-                match: { 'labels.trace_id': traceId }
+                match: { 'labels.trace_id.keyword': traceId }
             }
         },
     }, {

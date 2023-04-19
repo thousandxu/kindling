@@ -22,11 +22,10 @@ G6.registerNode('custom-node', {
             draggable: true,
         });
 
-        group.addShape('text', {
+        let nameText = group.addShape('text', {
             attrs: {
-                x: nodeW / 2,
+                x: 5,
                 y: 5,
-                textAlign: 'center',
                 textBaseline: 'top',
                 class: 'node_text',
                 fontSize: 10,
@@ -52,6 +51,13 @@ G6.registerNode('custom-node', {
             id: 'node-name',
             name: 'node-name',
         });
+
+        let nameTextBox = nameText.getBBox();
+        shape.attr({
+            width: nameTextBox.width + 10
+        });
+
+
         node.list.forEach((opt, idx) => {
             group.addShape('text', {
                 attrs: {

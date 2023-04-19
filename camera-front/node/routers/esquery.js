@@ -28,7 +28,6 @@ function esClientService() {
                             "query_string": {
                                 "default_field": keyword,
                                 "query": value
-                                // "query": "*" + keyword + "*"
                             }
                         }],
                         must_not: [],
