@@ -69,7 +69,7 @@ function Trace() {
         graph.on('node-time-text:click', (evt: any) => {
             const node = evt.item.getModel();
             const timeIdx = evt.target.attr('timeIdx');
-            navigate(`/thread?query=es&pid=${node.pid}&stime=${node.list[timeIdx].endTime - 1}&etime=${node.list[timeIdx].endTime}&protocl=${node.protocol}`);
+            navigate(`/thread?query=es&pid=${node.pid}&stime=${node.list[timeIdx].endTime - 1}&etime=${node.list[timeIdx].endTime + 1}&protocl=${node.protocol}`);
         });
     }
     return (
