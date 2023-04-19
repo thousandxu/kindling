@@ -23,14 +23,14 @@ function handleData(data) {
                 dst_container: item.labels.dst_container,
                 dst_pod: item.labels.dst_pod,
                 dst_workload_name: item.labels.dst_workload_name,
-                is_profiled: item.labels.is_profiled,
                 pid: item.labels.pid,
                 protocol: item.labels.protocol,
                 list: [
                     {
                         endTime: timestamp,
                         totalTime: metric ? metric.Data.Value : 0,
-                        p90: item.labels.p90
+                        p90: item.labels.p90,
+                        is_profiled: item.labels.is_profiled,
                     }
                 ]
             }
@@ -42,6 +42,7 @@ function handleData(data) {
                     endTime: timestamp,
                     totalTime: metric ? metric.Data.Value : 0,
                     p90: item.labels.p90,
+                    is_profiled: item.labels.is_profiled,
                 });
             }
         }

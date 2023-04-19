@@ -13,7 +13,7 @@ G6.registerNode('custom-node', {
                 width: nodeW,
                 height: node.list.length > 2 ? node.list.length * 15 + 25 : 55,
                 fill: '#ffffff',
-                stroke: node.is_profiled ? '#096dd9' : '#9d9d9d',
+                stroke: '#9d9d9d',
                 radius: 4,
                 fillOpacity: 0.08
             },
@@ -31,7 +31,7 @@ G6.registerNode('custom-node', {
                 fontSize: 10,
                 lineHeight: 10,
                 text: node.dst_pod,
-                fill: node.is_profiled ? '#096dd9' : '#595959',
+                fill: '#595959',
             },
             id: 'node-name',
             name: 'node-name',
@@ -70,8 +70,8 @@ G6.registerNode('custom-node', {
                     lineHeight: 10,
                     text: `${formatTimeNs(opt.totalTime)}   ${formatTimeNs(opt.p90)}`,
                     timeIdx: idx,
-                    cursor: node.is_profiled ? 'pointer' : 'default',
-                    fill: '#595959',
+                    cursor: opt.is_profiled ? 'pointer' : 'default',
+                    fill: opt.is_profiled ? '#096dd9' : '#595959',
                 },
                 name: 'node-time-text',
             });
@@ -80,17 +80,17 @@ G6.registerNode('custom-node', {
         return shape;
     },
     afterDraw(cfg: any, group) {
-        if (cfg.is_profiled) {
-            let nodeTimeText = group?.findAllByName('node-time-text');
-            nodeTimeText?.forEach(text => {
-                text.on('mouseenter', () => {
-                    text.attr({ fill: '#096dd9' });
-                });
-                text.on('mouseleave', () => {
-                    text.attr({ fill: '#595959' });
-                });
-            });
-        }
+        // if (cfg.is_profiled) {
+        //     let nodeTimeText = group?.findAllByName('node-time-text');
+        //     nodeTimeText?.forEach(text => {
+        //         text.on('mouseenter', () => {
+        //             text.attr({ fill: '#096dd9' });
+        //         });
+        //         text.on('mouseleave', () => {
+        //             text.attr({ fill: '#595959' });
+        //         });
+        //     });
+        // }
     },
     update: (cfg: any, node: any) => {
 
