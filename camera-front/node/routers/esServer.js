@@ -91,7 +91,7 @@ router.get('/getTraceData', async(req, res, next) => {
         // type: '_doc',
         body: {
             query: {
-                match: { 'labels.trace_id.keyword': traceId }
+                match: { 'labels.trace_id': traceId }
             }
         },
     }, {
