@@ -17,6 +17,8 @@ type Config struct {
 	PrometheusQueryInterval int `mapstructure:"promethues_query_interval"`
 	// Set the increase rate for p9x
 	P9xIncreaseRate float64 `mapstructure:"query_p9x_increase_rate"`
+	// Store tailbased Profiling data
+	StoreProfileTailBase bool `mapstructure:"store_profile_tailbase"`
 	// The Receiver Ip
 	ReceiverIp string `mapstructure:"receiver_ip"`
 	// The Receiver Port

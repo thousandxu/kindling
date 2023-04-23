@@ -149,6 +149,8 @@ processors:
     promethues_query_interval: 30
     # Set the rate for p9x value.
     query_p9x_increase_rate: 1.1
+    # Store Profile when trace is tailBase stored.
+    store_profile_tailbase: false
     # Set Receiver Ip
     receiver_ip: 127.0.0.1
     # Set Receiver Ip

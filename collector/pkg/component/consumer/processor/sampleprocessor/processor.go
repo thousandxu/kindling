@@ -91,12 +91,7 @@ func (p *SampleProcessor) Consume(dataGroup *model.DataGroup) error {
 		p.sampleCache.storeProfiling(sampleTrace)
 		p.sampleCache.storeTrace(sampleTrace)
 	} else if p.sampleCache.isTailBaseSampled(sampleTrace) {
-		if p.sampleCache.isSlow(sampleTrace) {
-			// Store Profiling
-			p.sampleCache.storeProfiling(sampleTrace)
-		}
-		// Store Trace
-		p.sampleCache.storeTrace(sampleTrace)
+		p.sampleCache.tailBaseProfiling(sampleTrace)
 	} else {
 		// Store datas into SampleCache for none-error, none slow or hit datas in N seconds.
 		p.sampleCache.cacheSampleTrace(sampleTrace)

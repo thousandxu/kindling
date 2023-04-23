@@ -44,9 +44,10 @@ type SampleCache struct {
 	// <url, lastTime>, store every url urlHitDuration(ms).
 	urlHits sync.Map
 	// config
-	traceHoldTime   uint64
-	urlHitDuration  uint64
-	p9xIncreaseRate float64
+	tailbasedProfile bool
+	traceHoldTime    uint64
+	urlHitDuration   uint64
+	p9xIncreaseRate  float64
 	// Grpc API
 	client    model.TraceIdServiceClient
 	queryTime int64
@@ -59,16 +60,17 @@ type SampleCache struct {
 
 func NewSampleCache(client model.TraceIdServiceClient, p9xClient model.P9XServiceClient, cfg *Config, telemetry *component.TelemetryTools, nextConsumer consumer.Consumer) *SampleCache {
 	return &SampleCache{
-		traceCache:      make([]*SampleTrace, 0),
-		unSendIds:       NewUnSendIds(cfg.SampleTraceRepeatNum),
-		traceHoldTime:   uint64(cfg.SampleTraceWaitTime) * 1000,
-		urlHitDuration:  uint64(cfg.SampleUrlHitDuration) * 1000,
-		client:          client,
-		queryTime:       0,
-		p9xCache:        newPrometheusP9xCache(p9xClient, telemetry),
-		p9xIncreaseRate: cfg.P9xIncreaseRate,
-		telemetry:       telemetry,
-		nextConsumer:    nextConsumer,
+		traceCache:       make([]*SampleTrace, 0),
+		unSendIds:        NewUnSendIds(cfg.SampleTraceRepeatNum),
+		tailbasedProfile: cfg.StoreProfileTailBase,
+		traceHoldTime:    uint64(cfg.SampleTraceWaitTime) * 1000,
+		urlHitDuration:   uint64(cfg.SampleUrlHitDuration) * 1000,
+		client:           client,
+		queryTime:        0,
+		p9xCache:         newPrometheusP9xCache(p9xClient, telemetry),
+		p9xIncreaseRate:  cfg.P9xIncreaseRate,
+		telemetry:        telemetry,
+		nextConsumer:     nextConsumer,
 	}
 }
 
@@ -104,6 +106,15 @@ func (cache *SampleCache) cacheSampleTrace(sampleTrace *SampleTrace) {
 	cache.traceLock.Lock()
 	defer cache.traceLock.Unlock()
 	cache.traceCache = append(cache.traceCache, sampleTrace)
+}
+
+func (cache *SampleCache) tailBaseProfiling(sampleTrace *SampleTrace) {
+	if cache.tailbasedProfile && cache.isSlow(sampleTrace) {
+		// Store Profiling
+		cache.storeProfiling(sampleTrace)
+	}
+	// Store Trace
+	cache.storeTrace(sampleTrace)
 }
 
 func (cache *SampleCache) storeProfiling(sampleTrace *SampleTrace) {
@@ -176,12 +187,8 @@ func (cache *SampleCache) checkTailBaseTraces() {
 	newLoopTraces := []*SampleTrace{}
 	for _, sampleTrace := range lastLoopTraces {
 		if cache.isTailBaseSampled(sampleTrace) {
-			if cache.isSlow(sampleTrace) {
-				// Store Profiling
-				cache.storeProfiling(sampleTrace)
-			}
-			// Store tailbase sampled trace
-			cache.storeTrace(sampleTrace)
+			// Store Profiling And Trace
+			cache.tailBaseProfiling(sampleTrace)
 		} else if sampleTrace.repeatNum > 0 {
 			// Set sampleTrace times-1.
 			sampleTrace.repeatNum--
