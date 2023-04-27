@@ -10,6 +10,10 @@ data:
             host: 'localhost',
             port: '2234',
         },
+        esServerConfig: {
+            host: '10.10.103.96',
+            port: '9200',
+        },
         profileConfig: {
             host: 'localhost',
             port: '9503',
