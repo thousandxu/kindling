@@ -23,6 +23,8 @@ int MAX_USERATTR_NUM = 8;
 map<string, ppm_event_type> m_events;
 map<string, Category> m_categories;
 vector<QObject*> qls;
+vector<char*> drop_tid_name;
+unordered_map<uint64_t, bool> drop_ptids;
 
 bool is_start_profile = false;
 bool all_attach = true;
@@ -48,6 +50,7 @@ char* finish_char = new char[4];
 char* kd_stack = new char[1024];
 char* duration_char = new char[32];
 char* span_char = new char[1024];
+uint64_t receiver_ts = 0;
 
 int16_t event_filters[1024][16];
 
@@ -63,6 +66,10 @@ void init_sub_label() {
       event_filters[i][j] = 0;
     }
   }
+}
+
+void add_drop_tid_name(char* name) {
+  drop_tid_name.push_back(name);
 }
 
 void sub_event(char* eventName, char* category, event_params_for_subscribe params[]) {
@@ -98,7 +105,18 @@ void sub_event(char* eventName, char* category, event_params_for_subscribe param
 void suppress_events_comm(string comm) {
   printCurrentTime();
   cout << "suppress_events for process " << comm << endl;
-  inspector->suppress_events_comm(comm);
+  bool is_success = inspector->suppress_events_comm(comm);
+  cout << is_success <<endl;
+}
+
+void suppress_events_comm_aa(sinsp* inspector) {
+  const string comms[] = {"kindling-collec", "sshd",           "containerd",      "dockerd",
+                          "containerd-shim", "kubelet",        "kube-apiserver",  "etcd",
+                          "kube-controller", "kube-scheduler", "kube-rbac-proxy", "prometheus",
+                          "node_exporter",   "alertmanager",   "adapter","systemd-journal","runc"};
+  for (auto& comm : comms) {
+    inspector->suppress_events_comm(comm);
+  }
 }
 
 void set_eventmask(sinsp* inspector) {
@@ -156,9 +174,9 @@ int init_probe() {
     formatter = new sinsp_evt_formatter(inspector, output_format);
     inspector->set_hostname_and_port_resolution_mode(false);
     set_snaplen(inspector);
+    suppress_events_comm_aa(inspector);
     inspector->open("");
     set_eventmask(inspector);
-
     cpuConverter = new cpu_converter(inspector);
   } catch (const exception& e) {
     fprintf(stderr, "kindling probe init err: %s", e.what());
@@ -167,17 +185,109 @@ int init_probe() {
   return 0;
 }
 
-int getEvent(void** pp_kindling_event) {
+int cpu_processor(sinsp_evt* ev, sinsp_threadinfo* threadInfo, sinsp_fdinfo_t* fdInfo, kindling_event_t_for_go* p_kindling_event, uint16_t userAttNumber){
+    if (ev->get_type() != PPME_CPU_ANALYSIS_E && is_profile_debug && threadInfo->m_tid == debug_tid &&
+        threadInfo->m_pid == debug_pid) {
+        print_profile_debug_info(ev);
+    }
+
+    if (is_start_profile) {
+        for (auto it = qls.begin(); it != qls.end(); it++) {
+            KindlingInterface* plugin = qobject_cast<KindlingInterface*>(*it);
+            if (plugin) {
+                plugin->addCache(ev, inspector);
+            }
+        }
+    }
+
+    if (is_start_profile && ev->get_type() == PPME_SYSCALL_WRITE_X && fdInfo != nullptr &&
+        fdInfo->is_file()) {
+        auto data_param = ev->get_param_value_raw("data");
+        if (data_param != nullptr) {
+            char* data_val = data_param->m_val;
+            if (data_param->m_len > 6 && memcmp(data_val, "kd-jf@", 6) == 0) {
+                parse_jf(data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+                return 1;
+            }
+            if (data_param->m_len > 8 && memcmp(data_val, "kd-txin@", 8) == 0) {
+                parse_txin(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+                return 1;
+            }
+            if (data_param->m_len > 9 && memcmp(data_val, "kd-txout@", 9) == 0) {
+                parse_txout(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+                return 1;
+            }
+            if (data_param->m_len > 8 && memcmp(data_val, "kd-span@", 8) == 0) {
+                parse_span(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
+                return 1;
+            }
+            if (data_param->m_len > 6 && memcmp(data_val, "kd-tm@", 6) == 0) {
+                parse_tm(data_val, *data_param, threadInfo);
+                return -1;
+            }
+        }
+    }
+
+    if (is_start_profile && ev->get_type() == PPME_CPU_ANALYSIS_E) {
+        char* tmp_comm;
+
+        map<uint64_t, char*>::iterator key =
+                ptid_comm.find(threadInfo->m_pid << 32 | (threadInfo->m_tid & 0xFFFFFFFF));
+        if (key != ptid_comm.end()) {
+            tmp_comm = key->second;
+        } else {
+            tmp_comm = (char*)threadInfo->m_comm.data();
+        }
+
+        strcpy(p_kindling_event->context.tinfo.comm, tmp_comm);
+        return cpuConverter->convert(p_kindling_event, ev, qls, is_profile_debug, debug_pid, debug_tid);
+    }
+    return 2;
+
+}
+
+int init_kindling_event_for_go(int number, void *kindlingEvent){
+  init_kindling_event((kindling_event_t_for_go*)kindlingEvent, number);
+}
+
+int get_events_by_interval(uint64_t interval, void *kindlingEvent, void *count){
+  vector<kindling_event_t_for_go*> p_kindling_events;
+  uint64_t tmp_ts = receiver_ts;
+  while (true){
+    getEvent(interval, (kindling_event_t_for_go*)kindlingEvent, (int *)count);
+    if(tmp_ts != receiver_ts){
+      break ;
+    }
+  }
+  return 0;
+}
+
+int getEvent(uint64_t interval, kindling_event_t_for_go evts[], int* event_count) {
   int32_t res;
   sinsp_evt* ev;
+  int evtcnt = *event_count;
   res = inspector->next(&ev);
-
   ppm_event_category category;
   int result = is_normal_event(res, ev, &category);
   if (result == -1) {
     return -1;
   }
+  if(receiver_ts == 0){
+    receiver_ts = ev->get_ts();
+  }
+
   auto threadInfo = ev->get_thread_info();
+  uint16_t kindling_category = get_kindling_category(ev);
+  uint16_t ev_type = ev->get_type();
+  print_event(ev);
+  if (ev_type != PPME_CPU_ANALYSIS_E && is_profile_debug && threadInfo->m_tid == debug_tid &&
+      threadInfo->m_pid == debug_pid) {
+    print_profile_debug_info(ev);
+  }
+
+  sinsp_fdinfo_t* fdInfo = ev->get_fd_info();
+  uint16_t userAttNumber = 0;
+  uint16_t source = get_kindling_source(ev->get_type());
   if (is_start_profile &&
       (ev->get_type() == PPME_SYSCALL_EXECVE_8_X || ev->get_type() == PPME_SYSCALL_EXECVE_13_X ||
        ev->get_type() == PPME_SYSCALL_EXECVE_15_X || ev->get_type() == PPME_SYSCALL_EXECVE_16_X ||
@@ -196,77 +306,31 @@ int getEvent(void** pp_kindling_event) {
       attach.join();
     }
   }
-  uint16_t kindling_category = get_kindling_category(ev);
-  uint16_t ev_type = ev->get_type();
 
-  print_event(ev);
-  if (ev_type != PPME_CPU_ANALYSIS_E && is_profile_debug && threadInfo->m_tid == debug_tid &&
-      threadInfo->m_pid == debug_pid) {
-    print_profile_debug_info(ev);
+  bool if_drop = true;
+  auto it = drop_ptids.find(threadInfo->m_pid);
+  if (it != drop_ptids.end()) {
+      if_drop = false;
   }
-  kindling_event_t_for_go* p_kindling_event;
-  init_kindling_event(p_kindling_event, pp_kindling_event);
-
-  sinsp_fdinfo_t* fdInfo = ev->get_fd_info();
-  p_kindling_event = (kindling_event_t_for_go*)*pp_kindling_event;
-  uint16_t userAttNumber = 0;
-  uint16_t source = get_kindling_source(ev->get_type());
-  if (is_start_profile) {
-    for (auto it = qls.begin(); it != qls.end(); it++) {
-      KindlingInterface* plugin = qobject_cast<KindlingInterface*>(*it);
-      if (plugin) {
-        plugin->addCache(ev, inspector);
+  kindling_event_t_for_go* p_kindling_event = &evts[*event_count];
+  if (!if_drop) {
+      int cpu_processor_res = cpu_processor(ev, threadInfo, fdInfo, p_kindling_event, userAttNumber);
+      if(cpu_processor_res == 1) {
+        evtcnt++;
+        *event_count = evtcnt;
+        if(ev->get_ts() - receiver_ts >= interval || *event_count >998){
+          receiver_ts = ev->get_ts();
+        }
       }
-    }
-  }
-
-  if (is_start_profile && ev->get_type() == PPME_SYSCALL_WRITE_X && fdInfo != nullptr &&
-      fdInfo->is_file()) {
-    auto data_param = ev->get_param_value_raw("data");
-    if (data_param != nullptr) {
-      char* data_val = data_param->m_val;
-      if (data_param->m_len > 6 && memcmp(data_val, "kd-jf@", 6) == 0) {
-        parse_jf(data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
-        return 1;
+      if (cpu_processor_res != 2) {
+          return cpu_processor_res;
       }
-      if (data_param->m_len > 8 && memcmp(data_val, "kd-txin@", 8) == 0) {
-        parse_txin(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
-        return 1;
-      }
-      if (data_param->m_len > 9 && memcmp(data_val, "kd-txout@", 9) == 0) {
-        parse_txout(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
-        return 1;
-      }
-      if (data_param->m_len > 8 && memcmp(data_val, "kd-span@", 8) == 0) {
-        parse_span(ev, data_val, *data_param, p_kindling_event, threadInfo, userAttNumber);
-        return 1;
-      }
-      if (data_param->m_len > 6 && memcmp(data_val, "kd-tm@", 6) == 0) {
-        parse_tm(data_val, *data_param, threadInfo);
-        return -1;
-      }
-    }
-  }
-
-  if (is_start_profile && ev_type == PPME_CPU_ANALYSIS_E) {
-    char* tmp_comm;
-
-    map<uint64_t, char*>::iterator key =
-        ptid_comm.find(threadInfo->m_pid << 32 | (threadInfo->m_tid & 0xFFFFFFFF));
-    if (key != ptid_comm.end()) {
-      tmp_comm = key->second;
-    } else {
-      tmp_comm = (char*)threadInfo->m_comm.data();
-    }
-
-    strcpy(p_kindling_event->context.tinfo.comm, tmp_comm);
-    return cpuConverter->convert(p_kindling_event, ev, qls, is_profile_debug, debug_pid, debug_tid);
   }
 
   if (event_filters[ev_type][kindling_category] == 0) {
     return -1;
   }
-
+ // init_kindling_event(p_kindling_event);
   if (source == SYSCALL_EXIT) {
     p_kindling_event->latency = threadInfo->m_latency;
   }
@@ -444,6 +508,12 @@ int getEvent(void** pp_kindling_event) {
   }
   strcpy(p_kindling_event->context.tinfo.comm, tmp_comm);
   strcpy(p_kindling_event->context.tinfo.containerId, (char*)threadInfo->m_container_id.data());
+  evtcnt++;
+  *event_count = evtcnt;
+  if(ev->get_ts() - receiver_ts >= interval || *event_count >998){
+    receiver_ts = ev->get_ts();
+  }
+  //cout<<"ts:"<<ev->get_ts()<<"  receiver ts:"<<receiver_ts<<" count"<< *event_count<<endl;
   return 1;
 }
 
@@ -816,6 +886,7 @@ void parse_tm(char* data_val, sinsp_evt_param data_param, sinsp_threadinfo* thre
       delete[] comm_char;
     } else {
       ptid_comm[threadInfo->m_pid << 32 | (atol(tid_char) & 0xFFFFFFFF)] = comm_char;
+      //if(comm_char)
     }
   } else {
     if (ptid_comm[threadInfo->m_pid << 32 | (v_tid & 0xFFFFFFFF)] != nullptr &&
@@ -828,11 +899,9 @@ void parse_tm(char* data_val, sinsp_evt_param data_param, sinsp_threadinfo* thre
   }
 }
 
-void init_kindling_event(kindling_event_t_for_go* p_kindling_event, void** pp_kindling_event) {
-  if (nullptr == *pp_kindling_event) {
-    *pp_kindling_event = (kindling_event_t_for_go*)malloc(sizeof(kindling_event_t_for_go));
-    p_kindling_event = (kindling_event_t_for_go*)*pp_kindling_event;
-
+void init_kindling_event(kindling_event_t_for_go evts[], int number) {
+  for(int i = 0;i<number;i++){
+    kindling_event_t_for_go* p_kindling_event = &evts[i];
     p_kindling_event->name = (char*)malloc(sizeof(char) * 1024);
     p_kindling_event->context.tinfo.comm = (char*)malloc(sizeof(char) * 256);
     p_kindling_event->context.tinfo.containerId = (char*)malloc(sizeof(char) * 256);
@@ -844,6 +913,21 @@ void init_kindling_event(kindling_event_t_for_go* p_kindling_event, void** pp_ki
       p_kindling_event->userAttributes[i].value = (char*)malloc(sizeof(char) * EVENT_DATA_SIZE);
     }
   }
+
+}
+
+void delete_kindling_event(kindling_event_t_for_go* p_kindling_event) {
+  for (int i = 0; i < 16; i++) {
+    free(p_kindling_event->userAttributes[i].key);
+    free(p_kindling_event->userAttributes[i].value);
+  }
+
+  free(p_kindling_event->name);
+  free(p_kindling_event->context.tinfo.comm);
+  free(p_kindling_event->context.tinfo.containerId);
+  free(p_kindling_event->context.fdInfo.filename);
+  free(p_kindling_event->context.fdInfo.directory);
+
 }
 
 void print_event(sinsp_evt* s_evt) {
@@ -1096,6 +1180,8 @@ void attach_pid(char* pid, bool is_new_start, bool is_attach, bool is_all_attach
   if (!is_ps && is_attach) {
     cout << "------"
          << " start attach for pid " << pid << "------" << endl;
+    string pid_str = pid;
+      drop_ptids.insert(make_pair(uint64_t(atoi(pid_str.c_str())), true));
   }
   if (!is_ps && !is_attach) {
     cout << "------"

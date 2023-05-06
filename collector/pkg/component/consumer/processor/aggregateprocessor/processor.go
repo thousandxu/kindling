@@ -124,7 +124,7 @@ func (p *AggregateProcessor) Consume(dataGroup *model.DataGroup) error {
 		profiled, sampled := p.isSampled(dataGroup)
 		if sampled {
 			dataGroup.Name = constnames.SingleNetRequestMetricGroup
-			cpuanalyzer.ReceiveDataGroupAsSignal(dataGroup)
+			//cpuanalyzer.ReceiveDataGroupAsSignal(dataGroup)
 
 			dataGroup.Labels.AddBoolValue(constlabels.IsProfiled, profiled)
 			abnormalDataErr = p.nextConsumer.Consume(dataGroup)

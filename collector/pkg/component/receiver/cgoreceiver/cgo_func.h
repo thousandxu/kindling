@@ -12,6 +12,8 @@ int runForGo();
 int getKindlingEvent(void **kindlingEvent);
 void suppressEventsCommForGo(char *comm);
 void subEventForGo(char* eventName, char* category, void *params);
+int initKindlingEventForGo(int number, void *kindlingEvent);
+int getEventsByInterval(int interval, void *kindlingEvent, void *count);
 int startProfile();
 int stopProfile();
 char* startAttachAgent(int pid);
