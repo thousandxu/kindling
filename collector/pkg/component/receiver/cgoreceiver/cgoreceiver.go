@@ -73,7 +73,8 @@ func (r *CgoReceiver) Start() error {
 	// Wait for the C routine running
 	time.Sleep(2 * time.Second)
 	go r.consumeEvents()
-	go r.startGetEvent()
+	//go r.startGetEvent()
+	go r.GetKindlingEvents()
 	return nil
 }
 
@@ -192,6 +193,25 @@ func (r *CgoReceiver) suppressEventsComm() {
 		csComm := C.CString(comm)
 		C.suppressEventsCommForGo(csComm)
 		C.free(unsafe.Pointer(csComm))
+	}
+}
+
+func (r *CgoReceiver) GetKindlingEvents() {
+	var count int = 0
+	npKindlingEvent := make([]CKindlingEventForGo, 1000)
+	C.initKindlingEventForGo(C.int(1000), (unsafe.Pointer)(&npKindlingEvent[0]))
+
+	for {
+		res := int(C.getEventsByInterval(C.int(100000000), (unsafe.Pointer)(&npKindlingEvent[0]), (unsafe.Pointer)(&count)))
+		if res == 0 {
+			for i := 0; i < count; i++ {
+				event := convertEvent((*CKindlingEventForGo)(&npKindlingEvent[i]))
+				r.eventChannel <- event
+				r.stats.add(event.Name, 1)
+			}
+			//r.telemetry.Logger.Info("total_number_of_kindling_events: ", zap.Int("num", count))
+		}
+		count = 0
 	}
 }
 
