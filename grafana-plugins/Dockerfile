@@ -4,7 +4,7 @@ COPY topo-plugin .
 RUN npm install
 RUN npm run build
 
-FROM grafana/grafana:8.5.26
+FROM grafana/grafana:8.5.27
 COPY --from=pluginbuild /app/topo-plugin /var/lib/grafana/plugins/kindlingproject-topology-panel
 COPY docker/grafana.ini /etc/grafana
 COPY docker/dashboards.yml /etc/grafana/provisioning/dashboards
