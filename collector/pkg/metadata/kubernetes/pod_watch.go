@@ -42,7 +42,7 @@ type workloadInfo struct {
 	WorkloadKind string
 }
 
-var globalPodInfo = newPodMap()
+var GlobalPodInfo = newPodMap()
 
 // localWorkloadMap only stores the workload whose pods are in the local Node.
 // The workload metadata will be sent to prometheus and used to filter metrics.
@@ -86,47 +86,49 @@ func newWorkloadMap() *workloadMap {
 
 func (m *podMap) add(info *K8sPodInfo) {
 	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	podInfoMap, ok := m.Info[info.Namespace]
 	if !ok {
 		podInfoMap = make(map[string]*K8sPodInfo)
 	}
 	podInfoMap[info.PodName] = info
 	m.Info[info.Namespace] = podInfoMap
-	m.mutex.Unlock()
 }
 
 func (m *podMap) delete(namespace string, name string) (*K8sPodInfo, bool) {
 	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	podInfoMap, ok := m.Info[namespace]
 	var podInfo *K8sPodInfo
-	if ok {
-		podInfo = podInfoMap[name]
-		delete(podInfoMap, name)
+	if !ok {
+		return nil, false
 	}
-	m.mutex.Unlock()
-	return podInfo, ok
+	podInfo, ok = podInfoMap[name]
+	if !ok {
+		return nil, false
+	}
+	delete(podInfoMap, name)
+	return podInfo, true
 }
 
 func (m *workloadMap) add(info *workloadInfo) {
 	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	workloadInfoMap, ok := m.Info[info.Namespace]
 	if !ok {
 		workloadInfoMap = make(map[string]*workloadInfo)
 	}
 	workloadInfoMap[info.WorkloadName] = info
 	m.Info[info.Namespace] = workloadInfoMap
-	m.mutex.Unlock()
-
 }
 
 func (m *workloadMap) delete(namespace string, name string) {
 	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	workloadInfoMap, ok := m.Info[namespace]
 	if ok {
 		delete(workloadInfoMap, name)
 	}
-	m.mutex.Unlock()
-
 }
 
 func (m *podMap) get(namespace string, name string) (*K8sPodInfo, bool) {
@@ -164,7 +166,7 @@ func (m *podMap) getPodsMatchSelectors(namespace string, selectors map[string]st
 	return retPodInfoSlice
 }
 
-func PodWatch(clientSet *kubernetes.Clientset, graceDeletePeriod time.Duration) {
+func PodWatch(clientSet *kubernetes.Clientset, graceDeletePeriod time.Duration, handler cache.ResourceEventHandler) {
 	stopper := make(chan struct{})
 	defer close(stopper)
 
@@ -180,17 +182,23 @@ func PodWatch(clientSet *kubernetes.Clientset, graceDeletePeriod time.Duration) 
 		runtime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
 		return
 	}
+
 	go podDeleteLoop(10*time.Second, graceDeletePeriod, stopper)
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    onAdd,
-		UpdateFunc: OnUpdate,
-		DeleteFunc: onDelete,
-	})
+
+	if handler == nil {
+		informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    AddPod,
+			UpdateFunc: UpdatePod,
+			DeleteFunc: DeletePod,
+		})
+	} else {
+		informer.AddEventHandler(handler)
+	}
 	// TODO: use workqueue to avoid blocking
 	<-stopper
 }
 
-func onAdd(obj interface{}) {
+func AddPod(obj interface{}) {
 	pod := obj.(*corev1.Pod)
 
 	// Find the controller workload of the pod
@@ -199,7 +207,7 @@ func onAdd(obj interface{}) {
 	rsUpdateMutex.RUnlock()
 
 	// Find one of the services of the pod
-	serviceInfoSlice := globalServiceInfo.GetServiceMatchLabels(pod.Namespace, pod.Labels)
+	serviceInfoSlice := GlobalServiceInfo.GetServiceMatchLabels(pod.Namespace, pod.Labels)
 	var serviceInfo *K8sServiceInfo
 	if len(serviceInfoSlice) == 0 {
 		serviceInfo = nil
@@ -281,7 +289,7 @@ func onAdd(obj interface{}) {
 			}
 		}
 	}
-	globalPodInfo.add(cachePodInfo)
+	GlobalPodInfo.add(cachePodInfo)
 	nodeName, _ := os.LookupEnv("MY_NODE_NAME")
 	//workloadMap only restore the workload in this machine
 	if cachePodInfo.NodeName == nodeName {
@@ -303,7 +311,7 @@ func getControllerKindName(pod *corev1.Pod) (workloadKind string, workloadName s
 			// The owner of Pod is ReplicaSet, and it is Workload such as Deployment for ReplicaSet.
 			// Therefore, find ReplicaSet's name in 'globalRsInfo' to find which kind of workload
 			// the Pod belongs to.
-			if workload, ok := globalRsInfo.GetOwnerReference(mapKey(pod.Namespace, owner.Name)); ok {
+			if workload, ok := GlobalRsInfo.GetOwnerReference(mapKey(pod.Namespace, owner.Name)); ok {
 				workloadKind = CompleteGVK(workload.APIVersion, strings.ToLower(workload.Kind))
 				workloadName = workload.Name
 			} else {
@@ -331,7 +339,7 @@ func extractDeploymentName(replicaSetName string) string {
 	return ""
 }
 
-func OnUpdate(objOld interface{}, objNew interface{}) {
+func UpdatePod(objOld interface{}, objNew interface{}) {
 	oldPod := objOld.(*corev1.Pod)
 	newPod := objNew.(*corev1.Pod)
 	if oldPod.ResourceVersion == newPod.ResourceVersion {
@@ -340,13 +348,13 @@ func OnUpdate(objOld interface{}, objNew interface{}) {
 		return
 	}
 
-	oldCachePod, ok := globalPodInfo.get(oldPod.Namespace, oldPod.Name)
+	oldCachePod, ok := GlobalPodInfo.get(oldPod.Namespace, oldPod.Name)
 	if !ok {
-		onAdd(objNew)
+		AddPod(objNew)
 		return
 	}
 	// Always override the old pod in the cache
-	onAdd(objNew)
+	AddPod(objNew)
 
 	// Delay delete the pod using the difference between the old pod and the new one
 	deletedPodInfo := &deletedPodInfo{
@@ -419,7 +427,7 @@ func OnUpdate(objOld interface{}, objNew interface{}) {
 	podDeleteQueueMut.Unlock()
 }
 
-func onDelete(obj interface{}) {
+func DeletePod(obj interface{}) {
 	// Maybe get DeletedFinalStateUnknown instead of *corev1.Pod.
 	// Fix https://github.com/KindlingProject/kindling/issues/445
 	pod, ok := obj.(*corev1.Pod)
